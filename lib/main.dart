@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 
 import 'services/ad_service.dart';
 import 'services/archive_service.dart';
+import 'services/archive_library.dart';
+import 'screens/my_files_screen.dart';
 import 'services/archive_file_types.dart';
 import 'services/export_service.dart';
 import 'services/zip_import_service.dart';
@@ -113,10 +115,14 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() { _busy = true; _status = description; });
     try {
       final output = await job();
+      if (mounted) setState(() => _status = 'Saving to My Files…');
+      // Permanently retain every successful create/extract operation.
+      final stored = await ArchiveLibrary().keep(output);
       if (!mounted) return;
       await Navigator.push<void>(
         context,
-        MaterialPageRoute<void>(builder: (context) => ResultScreen(output: output, service: _archiveService, ads: _ads)),
+        MaterialPageRoute<void>(builder: (context) =>
+            ResultScreen(output: stored, service: _archiveService, ads: _ads)),
       );
     } catch (error) {
       _error(error);
@@ -264,6 +270,18 @@ class _HomeScreenState extends State<HomeScreen> {
             description: 'Select multiple files and compress them',
             onTap: _busy ? null : _compress,
           ),
+          const SizedBox(height: 12),
+          _ActionCard(
+            icon: Icons.folder_copy_outlined,
+            title: 'My Files',
+            description: 'Created ZIPs and extracted photos, Word, Excel, PPT, APK and more',
+            onTap: _busy ? null : () {
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const MyFilesScreen()),
+              );
+            },
+          ),
           if (_busy) ...[
             const SizedBox(height: 22),
             const LinearProgressIndicator(),
@@ -392,6 +410,10 @@ class _ResultScreenState extends State<ResultScreen> {
           const SizedBox(height: 6),
           Text('${widget.output.fileCount} file(s)', textAlign: TextAlign.center,
             style: const TextStyle(color: Color(0xFF647085))),
+          const SizedBox(height: 6),
+          const Text('Saved automatically in My Files',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF369A73), fontSize: 12)),
           const SizedBox(height: 16),
           if (isFolder) ...[
             const Text('Extracted files · tap one to save it separately',
@@ -457,7 +479,17 @@ class _ResultScreenState extends State<ResultScreen> {
               isFolder ? 'Export extracted folder' : 'Save ZIP to device'),
           ),
           const SizedBox(height: 12),
-          OutlinedButton(
+          OutlinedButton.icon(
+            onPressed: _saving ? null : () {
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const MyFilesScreen()),
+              );
+            },
+            icon: const Icon(Icons.folder_copy_outlined),
+            label: const Text('View My Files'),
+          ),
+          TextButton(
             onPressed: _saving ? null : () => Navigator.pop(context),
             child: const Text('Back to home'),
           ),
