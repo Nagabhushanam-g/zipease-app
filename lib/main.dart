@@ -1,11 +1,13 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:path/path.dart' as p;
 
 import 'services/ad_service.dart';
 import 'services/archive_service.dart';
 import 'services/export_service.dart';
+import 'services/zip_import_service.dart';
 import 'widgets/test_banner.dart';
 
 void main() {
@@ -90,8 +92,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _error(Object error) {
     if (!mounted) return;
-    final message = error is FormatException ? error.message :
-      'Could not complete the operation. Check the ZIP file, password, or available storage.';
+    final message = error is FormatException
+        ? error.message
+        : error is PlatformException
+            ? (error.message ?? 'Could not read the selected ZIP.')
+            : 'Could not complete the operation. Check the ZIP file, password, or available storage.';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -123,16 +128,27 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _extract() async {
     if (_busy) return;
     try {
-      final file = await FilePicker.pickFile(type: FileType.any);
-      if (!mounted || file == null) return;
-      if (!file.name.toLowerCase().endsWith('.zip')) {
-        _error(const FormatException('Please select a .zip file.'));
-        return;
+      // Android providers expose ZIP documents through content:// URIs, not
+      // always through readable local paths or the same MIME type.
+      final selected = await ZipImportService.pickZip();
+      if (!mounted || selected == null) return;
+      try {
+        final password = await _passwordPrompt();
+        if (password == null || !mounted) return;
+        await _perform(
+          () => _archiveService.extractLocalZip(
+            selected.path,
+            password: password,
+          ),
+          'Extracting your ZIP file…',
+        );
+      } finally {
+        // Only the private temporary copy is deleted, never the user's ZIP.
+        await selected.deleteTemporaryCopy();
       }
-      final password = await _passwordPrompt();
-      if (password == null || !mounted) return;
-      await _perform(() => _archiveService.extract(file, password: password), 'Extracting your ZIP file…');
-    } catch (error) { _error(error); }
+    } catch (error) {
+      _error(error);
+    }
   }
 
   Future<String?> _passwordPrompt() async {
