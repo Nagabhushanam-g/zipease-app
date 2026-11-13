@@ -270,7 +270,10 @@ class MainActivity : FlutterActivity() {
 
     private fun isWithinPrivateStorage(file: File): Boolean {
         val resolved = file.canonicalPath
-        return listOf(cacheDir, filesDir).any { root ->
+        // PathProvider stores persistent Flutter documents in app_flutter.
+        // ZipEase's My Files library must be exportable just like cache output.
+        val flutterDocuments = File(applicationInfo.dataDir, "app_flutter")
+        return listOf(cacheDir, filesDir, flutterDocuments).any { root ->
             resolved.startsWith(root.canonicalPath + File.separator)
         }
     }
