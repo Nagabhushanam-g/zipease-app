@@ -119,7 +119,7 @@ class ArchiveService {
     final names = <String>[];
     await for (final item in root.list(recursive: true, followLinks: false)) {
       if (item is File) names.add(p.relative(item.path, from: root.path));
-      if (names.length >= 30) break;
+      // Extraction already enforces ArchiveGuard.maxEntries: show all files.
     }
     names.sort();
     return names;

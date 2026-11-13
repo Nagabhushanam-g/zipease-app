@@ -328,26 +328,52 @@ class _ResultScreenState extends State<ResultScreen> {
   late final Future<List<String>> _preview = widget.service.preview(widget.output);
   bool _saving = false;
   bool _saved = false;
+  String _filter = '';
 
-  Future<void> _save() async {
+  Future<void> _export({
+    required String path,
+    required String fileName,
+    required bool wholeOutput,
+  }) async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      final fileName = widget.output.isDirectory ? p.basename(widget.output.path) : p.basename(widget.output.path);
-      final saved = await ExportService.saveToDevice(widget.output.path, fileName: fileName);
+      final saved = await ExportService.saveToDevice(path, fileName: fileName);
       if (!mounted) return;
       if (saved) {
-        setState(() => _saved = true);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved to the selected location.')));
+        if (wholeOutput) setState(() => _saved = true);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved ${fileName} to your selected location.'),
+        ));
         widget.ads.onSuccessfulExport();
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save the output. Check storage space and folder access.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not save. Check file name, space and folder access.'),
+        ));
       }
-    } finally { if (mounted) setState(() => _saving = false); }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _save() => _export(
+    path: widget.output.path,
+    fileName: p.basename(widget.output.path),
+    wholeOutput: true,
+  );
+
+  Future<void> _saveFile(String relativeName) async {
+    // Names originate from our extracted folder scan. Android also checks
+    // the canonical source path is located inside app-private storage.
+    if (relativeName.isEmpty || p.isAbsolute(relativeName) ||
+        p.split(relativeName).contains('..')) return;
+    await _export(
+      path: p.join(widget.output.path, relativeName),
+      fileName: p.basename(relativeName),
+      wholeOutput: false,
+    );
   }
 
   @override
@@ -358,43 +384,83 @@ class _ResultScreenState extends State<ResultScreen> {
       body: SafeArea(child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Icon(Icons.check_circle_rounded, size: 76, color: Color(0xFF369A73)),
-          const SizedBox(height: 14),
+          const Icon(Icons.check_circle_rounded, size: 64, color: Color(0xFF369A73)),
+          const SizedBox(height: 12),
           Text(isFolder ? 'ZIP extracted successfully' : 'ZIP created successfully',
-            textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 21)),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 21)),
           const SizedBox(height: 6),
           Text('${widget.output.fileCount} file(s)', textAlign: TextAlign.center,
             style: const TextStyle(color: Color(0xFF647085))),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           if (isFolder) ...[
-            const Text('Extracted files (up to 30 shown)', style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text('Extracted files · tap one to save it separately',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            TextField(
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search files in the ZIP',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (value) => setState(
+                () => _filter = value.toLowerCase().trim(),
+              ),
+            ),
             const SizedBox(height: 8),
             Expanded(child: Card(child: FutureBuilder<List<String>>(
               future: _preview,
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                if (snapshot.data!.isEmpty) return const Center(child: Text('The ZIP contains no files.'));
+                if (snapshot.hasError) {
+                  return const Center(child: Text('Unable to list extracted files.'));
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final allFiles = snapshot.data!;
+                if (allFiles.isEmpty) {
+                  return const Center(child: Text('This ZIP contains no files.'));
+                }
+                final visible = _filter.isEmpty ? allFiles :
+                    allFiles.where((name) => name.toLowerCase().contains(_filter)).toList();
+                if (visible.isEmpty) {
+                  return const Center(child: Text('No matching files.'));
+                }
                 return ListView.separated(
-                  itemCount: snapshot.data!.length,
-                  itemBuilder: (context, index) => ListTile(
-                    dense: true,
-                    leading: Icon(ArchiveFileTypes.icon(snapshot.data![index])),
-                    title: Text(snapshot.data![index], maxLines: 2, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(ArchiveFileTypes.label(snapshot.data![index])),
-                  ),
+                  itemCount: visible.length,
+                  itemBuilder: (context, index) {
+                    final name = visible[index];
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(ArchiveFileTypes.icon(name)),
+                      title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(ArchiveFileTypes.label(name)),
+                      trailing: const Icon(Icons.save_alt_outlined),
+                      enabled: !_saving,
+                      onTap: () => _saveFile(name),
+                    );
+                  },
                   separatorBuilder: (_, index) => const Divider(height: 1),
                 );
               },
             ))),
           ] else const Spacer(),
+          const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
-            icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) :
-              Icon(_saved ? Icons.check : Icons.save_alt),
-            label: Text(_saving ? 'Saving…' : isFolder ? 'Export extracted folder' : 'Save ZIP to device'),
+            icon: _saving
+                ? const SizedBox(width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(_saved ? Icons.check : Icons.save_alt),
+            label: Text(_saving ? 'Saving…' :
+              isFolder ? 'Export extracted folder' : 'Save ZIP to device'),
           ),
           const SizedBox(height: 12),
-          OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Back to home')),
+          OutlinedButton(
+            onPressed: _saving ? null : () => Navigator.pop(context),
+            child: const Text('Back to home'),
+          ),
         ]),
       )),
     );

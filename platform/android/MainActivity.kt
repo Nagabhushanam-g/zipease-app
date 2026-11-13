@@ -124,7 +124,7 @@ class MainActivity : FlutterActivity() {
                 } else {
                     Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "application/zip"
+                        type = mimeForFile(safeName)
                         putExtra(Intent.EXTRA_TITLE, safeName)
                     }
                 }
@@ -310,6 +310,35 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    /** Correct file type when saving individual extracted files. */
+    private fun mimeForFile(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "zip" -> "application/zip"
+            "apk" -> "application/vnd.android.package-archive"
+            "doc" -> "application/msword"
+            "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            "xls" -> "application/vnd.ms-excel"
+            "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "ppt" -> "application/vnd.ms-powerpoint"
+            "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            "pdf" -> "application/pdf"
+            "csv" -> "text/csv"
+            "txt" -> "text/plain"
+            "mp4" -> "video/mp4"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "7z" -> "application/x-7z-compressed"
+            "rar" -> "application/vnd.rar"
+            else -> URLConnection.guessContentTypeFromName(name)
+                ?: "application/octet-stream"
+        }
+    }
+
     private fun copyDirectory(directory: File, targetParent: Uri, allowedRoot: File) {
         val rootPath = allowedRoot.canonicalPath
         for (child in (directory.listFiles() ?: throw IllegalStateException("Folder could not be listed")).sortedBy { it.name }) {
@@ -324,7 +353,7 @@ class MainActivity : FlutterActivity() {
                     ?: throw IllegalStateException("Could not create folder: ${child.name}")
                 copyDirectory(child, newFolder, allowedRoot)
             } else if (child.isFile) {
-                val mime = URLConnection.guessContentTypeFromName(child.name) ?: "application/octet-stream"
+                val mime = mimeForFile(child.name)
                 val created = DocumentsContract.createDocument(
                     contentResolver, targetParent, mime, child.name)
                     ?: throw IllegalStateException("Could not create file: ${child.name}")
