@@ -32,20 +32,32 @@ if count != 1:
 if "MANAGE_EXTERNAL_STORAGE" in xml or "READ_EXTERNAL_STORAGE" in xml:
     raise SystemExit("Broad storage permissions are not permitted.")
 
-# Register ZipEase as an external ZIP opener (Android "Open with").
-# This must be inserted in the MAIN ACTIVITY, not alongside the launcher.
-if 'android.intent.action.VIEW' not in xml:
-    view_filter = """
-            <!-- Register ZipEase for ZIP files opened in Downloads/File Manager. -->
+# Android ZIP association: VIEW is for "Open with"; SEND is for "Share".
+# MIME-only filters match local content:// and file:// URIs. In contrast,
+# ACTION_SEND normally has no data URI (it uses EXTRA_STREAM), so its filter
+# must not require a URI scheme. Other formats inside ZIPs are handled as bytes.
+if 'android.intent.action.VIEW' not in xml or 'android.intent.action.SEND' not in xml:
+    filters = """
+            <!-- ZIP files opened from Files, Downloads or other apps. -->
             <intent-filter android:label="ZipEase">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
                 <data android:mimeType="application/x-zip" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-compressed" />
+            </intent-filter>
+
+            <!-- ZIP files shared via Android's share sheet. -->
+            <intent-filter android:label="ZipEase">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-compressed" />
             </intent-filter>
             <meta-data
                 android:name="flutter_deeplinking_enabled"
@@ -56,10 +68,10 @@ if 'android.intent.action.VIEW' not in xml:
         xml,
     )
     if activity is None:
-        raise SystemExit("Flutter MainActivity not found for ZIP Open with registration.")
+        raise SystemExit("Flutter MainActivity not found for ZIP intent registration.")
     if 'android:exported="true"' not in activity.group(1):
         raise SystemExit("MainActivity must be exported to handle external ZIP files.")
-    xml = xml[:activity.start(3)] + view_filter + xml[activity.start(3):]
+    xml = xml[:activity.start(3)] + filters + xml[activity.start(3):]
 
 manifest.write_text(xml, encoding="utf-8")
 

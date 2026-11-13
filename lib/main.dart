@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'services/ad_service.dart';
 import 'services/archive_service.dart';
+import 'services/archive_file_types.dart';
 import 'services/export_service.dart';
 import 'services/zip_import_service.dart';
 import 'widgets/test_banner.dart';
@@ -377,8 +378,9 @@ class _ResultScreenState extends State<ResultScreen> {
                   itemCount: snapshot.data!.length,
                   itemBuilder: (context, index) => ListTile(
                     dense: true,
-                    leading: const Icon(Icons.insert_drive_file_outlined),
+                    leading: Icon(ArchiveFileTypes.icon(snapshot.data![index])),
                     title: Text(snapshot.data![index], maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(ArchiveFileTypes.label(snapshot.data![index])),
                   ),
                   separatorBuilder: (_, index) => const Divider(height: 1),
                 );

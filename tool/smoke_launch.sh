@@ -43,4 +43,18 @@ if ! echo "$VIEW_HANDLERS" | grep -F "$PACKAGE" >/dev/null; then
   echo "::error::ZipEase is not registered as a ZIP Open with activity."
   exit 1
 fi
-echo "ZipEase cold-start and ZIP Open with registration passed."
+for MIME in application/zip application/x-zip-compressed application/octet-stream; do
+  echo "Validating ZipEase VIEW for $MIME..."
+  RESULT="$(adb shell cmd package query-activities --brief -a android.intent.action.VIEW -t "$MIME" -d content://com.android.externalstorage.documents/document/primary%3ADownload%2Fsample.zip || true)"
+  if ! echo "$RESULT" | grep -F "$PACKAGE" >/dev/null; then
+    echo "::error::Missing ZipEase ZIP Open with handler for $MIME"
+    exit 1
+  fi
+  echo "Validating ZipEase SEND for $MIME..."
+  RESULT="$(adb shell cmd package query-activities --brief -a android.intent.action.SEND -t "$MIME" || true)"
+  if ! echo "$RESULT" | grep -F "$PACKAGE" >/dev/null; then
+    echo "::error::Missing ZipEase ZIP Share handler for $MIME"
+    exit 1
+  fi
+done
+echo "ZipEase startup, ZIP Open with, and ZIP Share registrations passed."
