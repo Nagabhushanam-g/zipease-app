@@ -13,6 +13,8 @@ void main() {
       final files = <String, List<int>>{
         'note.txt': 'ZipEase extraction test'.codeUnits,
         'picture.png': <int>[137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 42],
+        // An APK is simply a binary archive member to ZIP extraction.
+        'release.apk': <int>[80, 75, 3, 4, 1, 0, 255, 144, 35, 17],
       };
 
       final encoder = ZipFileEncoder();

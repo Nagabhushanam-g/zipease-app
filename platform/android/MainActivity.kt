@@ -26,8 +26,8 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
-                if (call.method == "pickZip") {
-                    openZipPicker(result)
+                if (call.method == "pickZip" || call.method == "pickZipAllFiles") {
+                    openZipPicker(result, call.method == "pickZipAllFiles")
                     return@setMethodCallHandler
                 }
                 if (call.method != "exportPath") {
@@ -74,24 +74,45 @@ class MainActivity : FlutterActivity() {
     }
 
 
-    /** Select a ZIP with the unrestricted Android Storage Access Framework.
-     * Different file providers label ZIPs with different MIME types; filtering
-     * strictly by application/zip can leave valid files unselectable.
+    /**
+     * Two modes are offered because OEM file managers sometimes browse a ZIP
+     * as if it were a directory, showing "No files" for its APK contents.
+     *
+     * GET_CONTENT is designed for importing a private copy of a document.
+     * If a provider mislabels the ZIP MIME type, users may instead select it
+     * through the unrestricted OPEN_DOCUMENT "Browse all files" fallback.
      */
-    private fun openZipPicker(result: MethodChannel.Result) {
+    private fun openZipPicker(result: MethodChannel.Result, browseAllFiles: Boolean) {
         if (pendingResult != null || pendingZipResult != null) {
             result.error("BUSY", "Another file selection is already running", null)
             return
         }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val intent = if (browseAllFiles) {
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(
+                    Intent.EXTRA_MIME_TYPES,
+                    arrayOf(
+                        "application/zip",
+                        "application/x-zip-compressed",
+                        "application/x-zip",
+                        "application/octet-stream"
+                    )
+                )
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
         }
         pendingZipResult = result
         try {
             @Suppress("DEPRECATION")
-            startActivityForResult(intent, requestCodeZipImport)
+            startActivityForResult(Intent.createChooser(intent, "Select ZIP archive"), requestCodeZipImport)
         } catch (e: Exception) {
             pendingZipResult = null
             result.error("PICKER_FAILED", e.message ?: "Unable to open document picker", null)

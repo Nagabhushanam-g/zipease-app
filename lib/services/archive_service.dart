@@ -88,6 +88,12 @@ class ArchiveService {
         throwOnError: true,
       );
       ArchiveGuard.validate(archive.files);
+      if (!archive.files.any((entry) => entry.isFile)) {
+        throw const FormatException(
+          'This ZIP archive has no files to extract. Select the ZIP itself, '
+          'not a folder inside it.',
+        );
+      }
       await extractArchiveToDisk(
         archive,
         output.path,

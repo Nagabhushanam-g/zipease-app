@@ -21,8 +21,12 @@ class PickedZip {
 class ZipImportService {
   static const _channel = MethodChannel('com.zipease.zipease/exports');
 
-  static Future<PickedZip?> pickZip() async {
-    final selected = await _channel.invokeMapMethod<String, String>('pickZip');
+  /// If the default ZIP-only import picker cannot show a provider's ZIP,
+  /// allow choosing from all documents as a fallback.
+  static Future<PickedZip?> pickZip({bool browseAllFiles = false}) async {
+    final selected = await _channel.invokeMapMethod<String, String>(
+      browseAllFiles ? 'pickZipAllFiles' : 'pickZip',
+    );
     if (selected == null) return null;
 
     final path = selected['path'];

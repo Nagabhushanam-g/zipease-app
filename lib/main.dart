@@ -125,12 +125,18 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (error) { _error(error); }
   }
 
-  Future<void> _extract() async {
+  Future<void> _extract() => _extractPicked(browseAllFiles: false);
+
+  Future<void> _browseAllZipFiles() => _extractPicked(browseAllFiles: true);
+
+  Future<void> _extractPicked({required bool browseAllFiles}) async {
     if (_busy) return;
     try {
-      // Android providers expose ZIP documents through content:// URIs, not
-      // always through readable local paths or the same MIME type.
-      final selected = await ZipImportService.pickZip();
+      // Use the import-style document picker first; on OEMs where archives
+      // appear as folders or are hidden, offer an unrestricted document picker.
+      final selected = await ZipImportService.pickZip(
+        browseAllFiles: browseAllFiles,
+      );
       if (!mounted || selected == null) return;
       try {
         final password = await _passwordPrompt();
@@ -216,6 +222,14 @@ class _HomeScreenState extends State<HomeScreen> {
             title: 'Extract ZIP',
             description: 'Unzip files and export the extracted folder',
             onTap: _busy ? null : _extract,
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _busy ? null : _browseAllZipFiles,
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: const Text("Can't find the ZIP? Browse all files"),
+            ),
           ),
           const SizedBox(height: 12),
           _ActionCard(
