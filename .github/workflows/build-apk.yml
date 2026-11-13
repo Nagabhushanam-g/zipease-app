@@ -64,6 +64,56 @@ jobs:
         if: success()
         uses: actions/github-script@v7
         with:
+          script: |
+            const { owner, repo } = context.repo;
+            const successfulRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: 'build-apk.yml', status: 'success', per_page: 100,
+            });
+            const successfulIds = new Set(successfulRuns.map(run => run.id));
+            // Current build has passed upload but this workflow is still running.
+            successfulIds.add(context.runId);
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner, repo, per_page: 100,
+            });
+            const completedArtifacts = artifacts
+              .filter(a => a.name.startsWith('zipease-apk-') && !a.expired &&
+                a.workflow_run && successfulIds.has(a.workflow_run.id))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            for (const artifact of completedArtifacts.slice(10)) {
+              await github.rest.actions.deleteArtifact({owner, repo, artifact_id: artifact.id});
+              core.info(`Deleted old ZipEase artifact: ${artifact.name}`);
+            }
+            core.info(`Retained ${Math.min(10, completedArtifacts.length)} successful APK artifact(s).`);
+
+  smoke-launch:
+    name: Android launch smoke test
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out ZipEase
+        uses: actions/checkout@v4
+
+      - name: Download APK from this build
+        uses: actions/download-artifact@v4
+        with:
+          name: zipease-apk-${{ github.run_number }}
+          path: smoke-apk
+
+      - name: Enable hardware acceleration for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and cold-start APK on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
           script: bash tool/smoke_launch.sh
 
       - name: Upload launcher screenshot and Android logs
