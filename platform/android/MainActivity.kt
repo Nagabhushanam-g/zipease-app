@@ -4,17 +4,21 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.net.URLConnection
 
 /** Streams app-private output to a user-selected document/folder via Android SAF. */
 class MainActivity : FlutterActivity() {
     private val channelName = "com.zipease.zipease/exports"
     private val requestCodeExport = 7402
+    private val requestCodeZipImport = 7403
+    private var pendingZipResult: MethodChannel.Result? = null
     private var pendingResult: MethodChannel.Result? = null
     private var exportSource: File? = null
 
@@ -22,11 +26,15 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
+                if (call.method == "pickZip") {
+                    openZipPicker(result)
+                    return@setMethodCallHandler
+                }
                 if (call.method != "exportPath") {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                if (pendingResult != null) {
+                if (pendingResult != null || pendingZipResult != null) {
                     result.error("BUSY", "Another export is already in progress", null)
                     return@setMethodCallHandler
                 }
@@ -65,6 +73,95 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+
+    /** Select a ZIP with the unrestricted Android Storage Access Framework.
+     * Different file providers label ZIPs with different MIME types; filtering
+     * strictly by application/zip can leave valid files unselectable.
+     */
+    private fun openZipPicker(result: MethodChannel.Result) {
+        if (pendingResult != null || pendingZipResult != null) {
+            result.error("BUSY", "Another file selection is already running", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        pendingZipResult = result
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, requestCodeZipImport)
+        } catch (e: Exception) {
+            pendingZipResult = null
+            result.error("PICKER_FAILED", e.message ?: "Unable to open document picker", null)
+        }
+    }
+
+    /** Copy the SAF content URI into app storage, then verify its ZIP signature.
+     * This avoids assuming the provider returned a readable filesystem path.
+     */
+    private fun importSelectedZip(resultCode: Int, data: Intent?) {
+        val result = pendingZipResult ?: return
+        pendingZipResult = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            result.success(null)
+            return
+        }
+        Thread {
+            var destination: File? = null
+            try {
+                val displayName = contentResolver.query(
+                    uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: "selected.zip"
+                val safeName = displayName.substringAfterLast('/')
+                    .substringAfterLast('\\').ifBlank { "selected.zip" }
+
+                destination = File.createTempFile("zipease_selected_", ".zip", cacheDir)
+                val source = contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Unable to read the selected document")
+                source.use { input ->
+                    FileOutputStream(destination).use { output ->
+                        val buffer = ByteArray(65536)
+                        var bytesReadTotal = 0L
+                        val maxInputBytes = 1024L * 1024 * 1024
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            bytesReadTotal += count.toLong()
+                            if (bytesReadTotal > maxInputBytes) {
+                                throw IllegalArgumentException("ZIP exceeds the 1 GiB import limit")
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                val signature = ByteArray(4)
+                val readCount = FileInputStream(destination).use { it.read(signature) }
+                val validZip = readCount == 4 &&
+                    signature[0] == 0x50.toByte() && signature[1] == 0x4B.toByte() &&
+                    ((signature[2] == 0x03.toByte() && signature[3] == 0x04.toByte()) ||
+                     (signature[2] == 0x05.toByte() && signature[3] == 0x06.toByte()) ||
+                     (signature[2] == 0x07.toByte() && signature[3] == 0x08.toByte()))
+                if (!validZip) throw IllegalArgumentException(
+                    "This document is not a valid ZIP file. Choose a .zip archive from Downloads."
+                )
+                val importedPath = destination.absolutePath
+                runOnUiThread {
+                    result.success(mapOf("path" to importedPath, "name" to safeName))
+                }
+            } catch (e: Exception) {
+                destination?.delete()
+                runOnUiThread {
+                    result.error("ZIP_IMPORT_FAILED", e.message ?: "Cannot read selected ZIP", null)
+                }
+            }
+        }.start()
+    }
+
     private fun isWithinPrivateStorage(file: File): Boolean {
         val resolved = file.canonicalPath
         return listOf(cacheDir, filesDir).any { root ->
@@ -75,6 +172,10 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Uses Android's Activity result callback for SAF")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == requestCodeZipImport) {
+            importSelectedZip(resultCode, data)
+            return
+        }
         if (requestCode != requestCodeExport) return
         val result = pendingResult ?: return
         val source = exportSource
