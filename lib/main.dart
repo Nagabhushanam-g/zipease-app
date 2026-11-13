@@ -8,9 +8,9 @@ import 'services/archive_service.dart';
 import 'services/export_service.dart';
 import 'widgets/test_banner.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
+  // The first screen must never wait for Google Play services or an ad network.
   runApp(const ZipEaseApp());
 }
 
@@ -49,12 +49,37 @@ class _HomeScreenState extends State<HomeScreen> {
   final _archiveService = ArchiveService();
   final _ads = InterstitialCoordinator();
   bool _busy = false;
+  bool _adsReady = false;
   String _status = '';
 
   @override
   void initState() {
     super.initState();
-    _ads.preload();
+    // Initialize ads only AFTER Flutter has drawn the home screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeAds();
+    });
+  }
+
+  Future<void> _initializeAds() async {
+    // Build with --dart-define=ZIPEASE_ENABLE_ADS=false to diagnose devices
+    // where Android's Google Mobile Ads SDK fails during initialization.
+    const adsEnabled = bool.fromEnvironment(
+      'ZIPEASE_ENABLE_ADS',
+      defaultValue: true,
+    );
+    if (!adsEnabled || !mounted) return;
+    try {
+      await MobileAds.instance.initialize().timeout(
+        const Duration(seconds: 12),
+      );
+      if (!mounted) return;
+      setState(() => _adsReady = true);
+      _ads.preload();
+    } catch (error) {
+      // Optional advertisements must never prevent ZIP and unzip from working.
+      debugPrint('ZipEase: ads unavailable; continuing without ads: $error');
+    }
   }
 
   @override
@@ -149,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [const Text('Free ZIP & UnZIP utility. All archive processing stays on your device. Test advertisements only.')]),
           icon: const Icon(Icons.info_outline), tooltip: 'About ZipEase')],
       ),
-      bottomNavigationBar: const Center(heightFactor: 1, child: TestBanner()),
+      bottomNavigationBar: _adsReady ? const TestBanner() : null,
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 14, 20, 26), children: [
           Container(
