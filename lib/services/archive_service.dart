@@ -59,12 +59,19 @@ class ArchiveService {
     }
   }
 
+  /// For existing callers that use the cross-platform picker.
   Future<ArchiveOutput> extract(PlatformFile pickedZip, {String? password}) async {
-    if (!pickedZip.name.toLowerCase().endsWith('.zip')) {
-      throw const FormatException('Choose a ZIP file.');
-    }
     final localPath = pickedZip.path;
-    if (localPath == null || !await File(localPath).exists()) {
+    if (localPath == null) {
+      throw const FormatException('The selected ZIP file is unavailable.');
+    }
+    return extractLocalZip(localPath, password: password);
+  }
+
+  /// Supports ZIPs copied from content:// providers via Android SAF, rather
+  /// than depending on filesystem paths exposed by the document provider.
+  Future<ArchiveOutput> extractLocalZip(String localPath, {String? password}) async {
+    if (!await File(localPath).exists()) {
       throw const FormatException('The selected ZIP file is unavailable.');
     }
 
