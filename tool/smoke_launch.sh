@@ -34,4 +34,13 @@ if ! echo "$ACTIVITY_INFO" | grep -E "(ResumedActivity|topResumedActivity|mResum
     exit 1
   fi
 fi
-echo "ZipEase cold-start passed: process alive and activity foreground."
+# Verify Android exposes ZipEase as an eligible ZIP ACTION_VIEW target.
+# This detects missing Open with manifest registrations in future releases.
+echo "Checking Android ZIP Open with registration..."
+VIEW_HANDLERS="$(adb shell cmd package query-activities --brief -a android.intent.action.VIEW -t application/zip -d content://com.android.externalstorage.documents/document/primary%3ADownload%2Fsample.zip || true)"
+echo "$VIEW_HANDLERS"
+if ! echo "$VIEW_HANDLERS" | grep -F "$PACKAGE" >/dev/null; then
+  echo "::error::ZipEase is not registered as a ZIP Open with activity."
+  exit 1
+fi
+echo "ZipEase cold-start and ZIP Open with registration passed."

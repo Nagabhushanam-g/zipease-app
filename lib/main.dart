@@ -52,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _ads = InterstitialCoordinator();
   bool _busy = false;
   bool _adsReady = false;
+  bool _openingZip = false;
   String _status = '';
 
   @override
@@ -60,6 +61,12 @@ class _HomeScreenState extends State<HomeScreen> {
     // Initialize ads only AFTER Flutter has drawn the home screen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeAds();
+      ZipImportService.registerOpenWithHandler(
+        _openSelectedZip,
+        _error,
+      ).catchError((Object error) {
+        _error(error);
+      });
     });
   }
 
@@ -86,6 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    ZipImportService.detachOpenWithHandler();
     _ads.dispose();
     super.dispose();
   }
@@ -130,30 +138,47 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _browseAllZipFiles() => _extractPicked(browseAllFiles: true);
 
   Future<void> _extractPicked({required bool browseAllFiles}) async {
-    if (_busy) return;
+    if (_busy || _openingZip) return;
     try {
-      // Use the import-style document picker first; on OEMs where archives
-      // appear as folders or are hidden, offer an unrestricted document picker.
       final selected = await ZipImportService.pickZip(
         browseAllFiles: browseAllFiles,
       );
-      if (!mounted || selected == null) return;
-      try {
-        final password = await _passwordPrompt();
-        if (password == null || !mounted) return;
-        await _perform(
-          () => _archiveService.extractLocalZip(
-            selected.path,
-            password: password,
-          ),
-          'Extracting your ZIP file…',
-        );
-      } finally {
-        // Only the private temporary copy is deleted, never the user's ZIP.
-        await selected.deleteTemporaryCopy();
-      }
+      if (selected != null) await _openSelectedZip(selected);
     } catch (error) {
       _error(error);
+    }
+  }
+
+  /// Shared by file pickers and Android's Open with/VIEW integration.
+  Future<void> _openSelectedZip(PickedZip selected) async {
+    try {
+      if (!mounted) return;
+      if (_busy || _openingZip) {
+        _error(const FormatException(
+          'Finish the current ZIP operation before opening another archive.',
+        ));
+        return;
+      }
+      _openingZip = true;
+      final password = await _passwordPrompt();
+      if (password == null || !mounted) return;
+      await _perform(
+        () => _archiveService.extractLocalZip(
+          selected.path,
+          password: password,
+        ),
+        'Extracting your ZIP file…',
+      );
+    } catch (error) {
+      _error(error);
+    } finally {
+      _openingZip = false;
+      // Only the temporary imported copy is removed, not the original ZIP.
+      try {
+        await selected.deleteTemporaryCopy();
+      } catch (error) {
+        debugPrint('Failed to remove ZIP temporary copy: $error');
+      }
     }
   }
 

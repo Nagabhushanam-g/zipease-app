@@ -31,6 +31,36 @@ if count != 1:
     raise SystemExit("Could not locate Flutter Android application label.")
 if "MANAGE_EXTERNAL_STORAGE" in xml or "READ_EXTERNAL_STORAGE" in xml:
     raise SystemExit("Broad storage permissions are not permitted.")
+
+# Register ZipEase as an external ZIP opener (Android "Open with").
+# This must be inserted in the MAIN ACTIVITY, not alongside the launcher.
+if 'android.intent.action.VIEW' not in xml:
+    view_filter = """
+            <!-- Register ZipEase for ZIP files opened in Downloads/File Manager. -->
+            <intent-filter android:label="ZipEase">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <meta-data
+                android:name="flutter_deeplinking_enabled"
+                android:value="false" />
+"""
+    activity = re.search(
+        r'(?s)(<activity\b[^>]*\bandroid:name="\.MainActivity"[^>]*>)(.*?)(</activity>)',
+        xml,
+    )
+    if activity is None:
+        raise SystemExit("Flutter MainActivity not found for ZIP Open with registration.")
+    if 'android:exported="true"' not in activity.group(1):
+        raise SystemExit("MainActivity must be exported to handle external ZIP files.")
+    xml = xml[:activity.start(3)] + view_filter + xml[activity.start(3):]
+
 manifest.write_text(xml, encoding="utf-8")
 
 # Android/WorkManager/Room R8 reflective-constructor compatibility rules.
