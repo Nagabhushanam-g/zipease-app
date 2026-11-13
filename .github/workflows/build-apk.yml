@@ -84,3 +84,57 @@ jobs:
               core.info(`Deleted old ZipEase artifact: ${artifact.name}`);
             }
             core.info(`Retained ${Math.min(10, completedArtifacts.length)} successful APK artifact(s).`);
+
+  smoke-launch:
+    name: Android launch smoke test
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out ZipEase
+        uses: actions/checkout@v4
+
+      - name: Download APK from this build
+        uses: actions/download-artifact@v4
+        with:
+          name: zipease-apk-${{ github.run_number }}
+          path: smoke-apk
+
+      - name: Enable hardware acceleration for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and cold-start APK on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          script: |
+            adb install -r smoke-apk/app-release.apk
+            adb logcat -c
+            adb shell am start -W -n com.zipease.zipease/.MainActivity
+            sleep 12
+            adb logcat -d > zipease-launch.log
+            adb exec-out screencap -p > zipease-launch.png
+            if ! adb shell pidof com.zipease.zipease; then
+              echo "ZipEase process exited during cold start. Relevant Android logs:"
+              grep -E 'FATAL EXCEPTION|AndroidRuntime|com.zipease.zipease' zipease-launch.log | tail -100 || true
+              exit 1
+            fi
+            echo "ZipEase cold-start passed: Android process remains running."
+
+      - name: Upload launcher screenshot and Android logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zipease-launch-check-${{ github.run_number }}
+          path: |
+            zipease-launch.log
+            zipease-launch.png
+          if-no-files-found: ignore
+          retention-days: 3
