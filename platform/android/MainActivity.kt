@@ -120,11 +120,12 @@ class MainActivity : FlutterActivity() {
                 val safeName = displayName.substringAfterLast('/')
                     .substringAfterLast('\\').ifBlank { "selected.zip" }
 
-                destination = File.createTempFile("zipease_selected_", ".zip", cacheDir)
+                val importedFile = File.createTempFile("zipease_selected_", ".zip", cacheDir)
+                destination = importedFile
                 val source = contentResolver.openInputStream(uri)
                     ?: throw IllegalStateException("Unable to read the selected document")
                 source.use { input ->
-                    FileOutputStream(destination).use { output ->
+                    FileOutputStream(importedFile).use { output ->
                         val buffer = ByteArray(65536)
                         var bytesReadTotal = 0L
                         val maxInputBytes = 1024L * 1024 * 1024
@@ -140,7 +141,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 val signature = ByteArray(4)
-                val readCount = FileInputStream(destination).use { it.read(signature) }
+                val readCount = FileInputStream(importedFile).use { it.read(signature) }
                 val validZip = readCount == 4 &&
                     signature[0] == 0x50.toByte() && signature[1] == 0x4B.toByte() &&
                     ((signature[2] == 0x03.toByte() && signature[3] == 0x04.toByte()) ||
@@ -149,7 +150,7 @@ class MainActivity : FlutterActivity() {
                 if (!validZip) throw IllegalArgumentException(
                     "This document is not a valid ZIP file. Choose a .zip archive from Downloads."
                 )
-                val importedPath = destination.absolutePath
+                val importedPath = importedFile.absolutePath
                 runOnUiThread {
                     result.success(mapOf("path" to importedPath, "name" to safeName))
                 }
