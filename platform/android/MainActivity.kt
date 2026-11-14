@@ -1,11 +1,15 @@
 package com.zipease.zipease
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -13,6 +17,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.URLConnection
+import java.util.UUID
 
 /** Streams app-private output to a user-selected document/folder via Android SAF. */
 class MainActivity : FlutterActivity() {
@@ -97,6 +102,10 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "pickZip" || call.method == "pickZipAllFiles") {
                     openZipPicker(result, call.method == "pickZipAllFiles")
+                    return@setMethodCallHandler
+                }
+                if (call.method == "fileAction") {
+                    openExternalFileAction(call, result)
                     return@setMethodCallHandler
                 }
                 if (call.method != "exportPath") {
@@ -261,6 +270,129 @@ class MainActivity : FlutterActivity() {
                     result.error(
                         "ZIP_IMPORT_FAILED",
                         error.message ?: "Cannot read selected ZIP",
+                        null
+                    )
+                }
+            }
+        }.start()
+    }
+
+
+    /** The user explicitly chose Open with, Share, or Install from My Files.
+     * Make a shareable copy under cache/zipease_outgoing and expose it only
+     * through a read-only FileProvider content URI, never file:// or root-path.
+     */
+    private fun openExternalFileAction(
+        call: io.flutter.plugin.common.MethodCall,
+        result: MethodChannel.Result
+    ) {
+        val kind = call.argument<String>("action")
+        val rawPath = call.argument<String>("path")
+        val rawName = call.argument<String>("fileName")
+        if (kind !in setOf("open", "share", "install") || rawPath == null || rawName == null) {
+            result.error("INVALID_ACTION", "Invalid file action", null)
+            return
+        }
+        val source = try { File(rawPath).canonicalFile } catch (_: Exception) { null }
+        if (source == null || !source.isFile || !isWithinPrivateStorage(source)) {
+            result.error("INVALID_SOURCE", "File is not in ZipEase private storage", null)
+            return
+        }
+        val filename = rawName.substringAfterLast('/').substringAfterLast('\\')
+        if (filename.isBlank() || filename == "." || filename == "..") {
+            result.error("INVALID_NAME", "Invalid file name", null)
+            return
+        }
+        if (kind == "install" && !filename.endsWith(".apk", ignoreCase = true)) {
+            result.error("INVALID_APK", "Only .apk files can be installed", null)
+            return
+        }
+
+        if (kind == "install" &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !packageManager.canRequestPackageInstalls()) {
+            try {
+                val settings = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(settings)
+                result.success("permission_required")
+            } catch (error: Exception) {
+                result.error("INSTALL_PERMISSION", "Enable install permission in Android settings.", null)
+            }
+            return
+        }
+
+        Thread {
+            try {
+                val outgoingRoot = File(cacheDir, "zipease_outgoing")
+                if (!outgoingRoot.exists() && !outgoingRoot.mkdirs()) {
+                    throw IllegalStateException("Unable to prepare temporary file sharing")
+                }
+                // Older temporary copies are expendable. Keep recent shares
+                // until consumers have finished using their granted URI.
+                val oldest = System.currentTimeMillis() - 48L * 60 * 60 * 1000
+                outgoingRoot.listFiles()?.forEach { old ->
+                    if (old.lastModified() < oldest) old.deleteRecursively()
+                }
+                val session = File(outgoingRoot, UUID.randomUUID().toString())
+                if (!session.mkdirs()) {
+                    throw IllegalStateException("Unable to create share folder")
+                }
+                val target = File(session, filename).canonicalFile
+                if (!target.path.startsWith(session.canonicalPath + File.separator)) {
+                    throw SecurityException("Invalid shared file name")
+                }
+                FileInputStream(source).use { input ->
+                    FileOutputStream(target).use { output ->
+                        input.copyTo(output, bufferSize = 64 * 1024)
+                    }
+                }
+                val uri = FileProvider.getUriForFile(
+                    this,
+                    "$packageName.zipease_files",
+                    target
+                )
+                runOnUiThread {
+                    try {
+                        val mime = mimeForFile(filename)
+                        val actionIntent = when (kind) {
+                            "share" -> Intent(Intent.ACTION_SEND).apply {
+                                type = mime
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                            }
+                            "install" -> Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                                setDataAndType(uri, "application/vnd.android.package-archive")
+                            }
+                            else -> Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, mime)
+                            }
+                        }
+                        actionIntent.clipData = ClipData.newRawUri(filename, uri)
+                        actionIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        if (kind == "install") {
+                            startActivity(actionIntent)
+                        } else {
+                            val title = if (kind == "share") "Share file" else "Open with"
+                            val chooser = Intent.createChooser(actionIntent, title)
+                            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            startActivity(chooser)
+                        }
+                        result.success("launched")
+                    } catch (error: Exception) {
+                        result.error(
+                            "NO_HANDLER",
+                            error.message ?: "No compatible app available",
+                            null
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error(
+                        "FILE_ACTION_FAILED",
+                        error.message ?: "Unable to prepare selected file",
                         null
                     )
                 }

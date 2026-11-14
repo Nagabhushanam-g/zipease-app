@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/archive_file_types.dart';
 import '../services/archive_library.dart';
 import '../services/export_service.dart';
+import '../services/file_actions.dart';
 
 enum _Source { all, created, extracted }
 
@@ -98,64 +100,155 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
     }
   }
 
+  Future<void> _fileAction(LibraryEntry entry, FileAction action) async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final status = await FileActions.perform(
+        path: entry.path,
+        name: entry.name,
+        action: action,
+      );
+      if (!mounted) return;
+      if (status == 'permission_required') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+            'Enable "Allow from this source" in Android settings, '
+            'then return and tap Install APK again.',
+          ),
+          duration: Duration(seconds: 7),
+        ));
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error.message ?? 'No compatible app is available.'),
+        ));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Unable to open file: ${error.toString()}'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _confirmInstall(LibraryEntry entry) async {
+    if (!entry.name.toLowerCase().endsWith('.apk')) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Install APK?'),
+        content: Text('Install ${entry.name} using Android’s system installer? '
+          'Only install APKs from sources you trust. '
+          'Android will ask you to confirm the installation.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      await _fileAction(entry, FileAction.install);
+    }
+  }
+
   Future<void> _details(LibraryEntry entry) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (c) => SafeArea(child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (entry.category == ArchiveFileCategory.image) ...[
-              SizedBox(height: 220,
-                child: Image.file(File(entry.path), fit: BoxFit.contain,
-                  errorBuilder: (_, error, stack) => const Center(
-                    child: Text('No image preview available.'),
+      builder: (c) => SafeArea(child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (entry.category == ArchiveFileCategory.image) ...[
+                SizedBox(height: 180,
+                  child: Image.file(File(entry.path), fit: BoxFit.contain,
+                    errorBuilder: (_, error, stack) => const Center(
+                      child: Text('No image preview available.'),
+                    ),
                   ),
                 ),
+                const SizedBox(height: 12),
+              ],
+              Row(children: [
+                Icon(ArchiveFileTypes.icon(entry.name), size: 32),
+                const SizedBox(width: 12),
+                Expanded(child: Text(entry.name,
+                  style: Theme.of(c).textTheme.titleMedium)),
+              ]),
+              const SizedBox(height: 8),
+              Text('${ArchiveFileTypes.label(entry.name)} · ${_size(entry.size)}'),
+              Text(entry.created ? 'Created ZIP' : 'Extracted file'),
+              Text(entry.relativePath, maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(c).textTheme.bodySmall),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                icon: const Icon(Icons.open_in_new),
+                onPressed: () {
+                  Navigator.pop(c);
+                  _fileAction(entry, FileAction.open);
+                },
+                label: const Text('Open with'),
               ),
-              const SizedBox(height: 12),
-            ],
-            Row(children: [
-              Icon(ArchiveFileTypes.icon(entry.name), size: 32),
-              const SizedBox(width: 12),
-              Expanded(child: Text(entry.name,
-                style: Theme.of(c).textTheme.titleMedium)),
-            ]),
-            const SizedBox(height: 12),
-            Text('${ArchiveFileTypes.label(entry.name)} · ${_size(entry.size)}'),
-            const SizedBox(height: 6),
-            Text(entry.created ? 'Created ZIP' : 'Extracted file'),
-            Text(entry.relativePath,
-              maxLines: 3, overflow: TextOverflow.ellipsis,
-              style: Theme.of(c).textTheme.bodySmall),
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              icon: const Icon(Icons.save_alt),
-              onPressed: () {
-                Navigator.pop(c);
-                _save(entry);
-              },
-              label: const Text('Save file to device'),
-            ),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () {
-                Navigator.pop(c);
-                _delete(entry);
-              },
-              label: const Text('Delete from My Files'),
-            ),
-            if (entry.category != ArchiveFileCategory.image)
-              const Text(
-                'For document or media viewing in another app, save the '
-                'file to your device. ZipEase never executes APKs or programs.',
+              OutlinedButton.icon(
+                icon: const Icon(Icons.share_outlined),
+                onPressed: () {
+                  Navigator.pop(c);
+                  _fileAction(entry, FileAction.share);
+                },
+                label: const Text('Share'),
+              ),
+              if (entry.name.toLowerCase().endsWith('.apk'))
+                FilledButton.icon(
+                  icon: const Icon(Icons.install_mobile_outlined),
+                  onPressed: () {
+                    Navigator.pop(c);
+                    _confirmInstall(entry);
+                  },
+                  label: const Text('Install APK'),
+                ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.save_alt),
+                onPressed: () {
+                  Navigator.pop(c);
+                  _save(entry);
+                },
+                label: const Text('Save file to device'),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () {
+                  Navigator.pop(c);
+                  _delete(entry);
+                },
+                label: const Text('Delete from My Files'),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                entry.name.toLowerCase().endsWith('.apk')
+                  ? 'APK installation requires your approval and Android’s '
+                    'system installer. Never install unknown APKs.'
+                  : 'Open with uses compatible apps installed on your phone. '
+                    'ZipEase does not run Windows executables.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 12),
               ),
-          ],
+            ],
+          ),
         ),
       )),
     );

@@ -73,6 +73,33 @@ if 'android.intent.action.VIEW' not in xml or 'android.intent.action.SEND' not i
         raise SystemExit("MainActivity must be exported to handle external ZIP files.")
     xml = xml[:activity.start(3)] + filters + xml[activity.start(3):]
 
+
+# A private FileProvider supplies short-lived read-only content:// URIs to
+# Android viewers, share targets and the system APK installer.
+if 'androidx.core.content.FileProvider' not in xml:
+    provider_tag = """
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="__APPLICATION_ID__.zipease_files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/zipease_share_paths" />
+        </provider>
+""".replace("__APPLICATION_ID__", "$" + "{applicationId}")
+    xml = xml.replace("</application>", provider_tag + "</application>", 1)
+
+# Required only for explicitly user-initiated APK installation via Android's
+# system installer. A Play Store release must justify this permission under
+# the restricted REQUEST_INSTALL_PACKAGES policy for file-management apps.
+if "android.permission.REQUEST_INSTALL_PACKAGES" not in xml:
+    xml = xml.replace(
+        "<application",
+        '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application',
+        1,
+    )
+
 manifest.write_text(xml, encoding="utf-8")
 
 # Android/WorkManager/Room R8 reflective-constructor compatibility rules.
@@ -103,3 +130,11 @@ if not proguard_source.is_file():
 proguard_target.write_text(
     proguard_source.read_text(encoding="utf-8"), encoding="utf-8"
 )
+
+# FileProvider is explicitly declared; pin AndroidX Core instead of depending
+# on incidental transitive plugin dependencies.
+core_dep = 'implementation("androidx.core:core:1.15.0")'
+if core_dep not in gradle_source:
+    gradle_source += '\n\ndependencies {\n    ' + core_dep + '\n}\n'
+    gradle.write_text(gradle_source, encoding="utf-8")
+
