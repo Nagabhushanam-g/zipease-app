@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -28,7 +29,7 @@ class ArchiveLibrary {
       Directory(p.join((await getApplicationDocumentsDirectory()).path,
           'zipease_library'));
 
-  Future<ArchiveOutput> keep(ArchiveOutput output) async {
+  Future<ArchiveOutput> keep(ArchiveOutput output, {String? sourceName}) async {
     final kind = output.isDirectory ? 'extracted' : 'created';
     final root = await _root();
     final parent = Directory(p.join(root.path, kind));
@@ -50,6 +51,12 @@ class ArchiveLibrary {
           throw const FormatException('The created ZIP is unavailable.');
         }
         await source.copy(p.join(staging.path, p.basename(source.path)));
+      }
+      if (output.isDirectory) {
+        final source = p.basename((sourceName ?? 'Unknown archive.zip').replaceAll('\\', '/'));
+        await File(p.join(staging.path, '.zipease_source.json')).writeAsString(
+          jsonEncode({'name': source.isEmpty ? 'Unknown archive.zip' : source}),
+        );
       }
       await staging.rename(finalDir.path);
       return ArchiveOutput(
@@ -89,7 +96,8 @@ class ArchiveLibrary {
       await for (final entity in dir.list(recursive: true, followLinks: false)) {
         if (entity is! File) continue;
         final relative = p.relative(entity.path, from: dir.path);
-        if (p.split(relative).any((part) => part.startsWith('.pending_'))) {
+        if (p.basename(relative) == '.zipease_source.json' ||
+            p.split(relative).any((part) => part.startsWith('.pending_'))) {
           continue;
         }
         final stat = await entity.stat();
@@ -102,6 +110,17 @@ class ArchiveLibrary {
     }
     found.sort((a, b) => b.modified.compareTo(a.modified));
     return found;
+  }
+
+  Future<String> extractionName(String sessionId) async {
+    final root = await _root();
+    final marker = File(p.join(root.path, 'extracted', sessionId, '.zipease_source.json'));
+    if (!await marker.exists()) return 'Earlier extraction';
+    try {
+      final value = jsonDecode(await marker.readAsString());
+      if (value is Map && value['name'] is String) return value['name'] as String;
+    } catch (_) {}
+    return 'Earlier extraction';
   }
 
   Future<void> delete(LibraryEntry entry) async {

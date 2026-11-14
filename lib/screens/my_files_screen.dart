@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -23,6 +24,20 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
   ArchiveFileCategory? _category;
   String _query = '';
   bool _exporting = false;
+  final Set<String> _expandedSessions = {};
+  final Map<String, String> _sessionNames = {};
+
+  Future<void> _loadNames(List<LibraryEntry> entries) async {
+    final ids = entries.where((e) => !e.created)
+        .map((e) => p.split(e.relativePath).first).toSet();
+    for (final id in ids) {
+      if (!_sessionNames.containsKey(id)) {
+        _sessionNames[id] = await _library.extractionName(id);
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
 
   static const types = <ArchiveFileCategory, String>{
     ArchiveFileCategory.image: 'Photos',
@@ -38,7 +53,10 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
     ArchiveFileCategory.other: 'Other',
   };
 
-  void _refresh() => setState(() => _loading = _library.files());
+  void _refresh() => setState(() {
+    _loading = _library.files();
+    _sessionNames.clear();
+  });
 
   String _size(int n) {
     if (n < 1024) return '$n B';
@@ -329,6 +347,14 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
+            final unknown = snap.data!.where((e) => !e.created)
+                .map((e) => p.split(e.relativePath).first).toSet()
+                .difference(_sessionNames.keys.toSet());
+            if (unknown.isNotEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _loadNames(snap.data!);
+              });
+            }
             final matches = snap.data!.where((e) =>
               (_source == _Source.all ||
                 (_source == _Source.created && e.created) ||
@@ -347,35 +373,60 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                 ),
               ));
             }
+            final grouped = <String, List<LibraryEntry>>{};
+            for (final entry in matches) {
+              final id = entry.created ? 'created' : p.split(entry.relativePath).first;
+              grouped.putIfAbsent(id, () => []).add(entry);
+            }
+            final groups = grouped.entries.toList()
+              ..sort((a, b) => b.value.first.modified.compareTo(a.value.first.modified));
             return Column(children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Align(alignment: Alignment.centerLeft,
-                  child: Text('${matches.length} file(s)',
+                  child: Text('\x24{matches.length} file(s) in \x24{groups.length} group(s)',
                     style: Theme.of(context).textTheme.bodySmall)),
               ),
-              Expanded(child: ListView.separated(
-                itemCount: matches.length,
-                separatorBuilder: (_, index) => const Divider(height: 1),
+              Expanded(child: ListView.builder(
+                itemCount: groups.length,
                 itemBuilder: (context, index) {
-                  final entry = matches[index];
-                  final img = entry.category == ArchiveFileCategory.image ?
-                    Image.file(File(entry.path), width: 42, height: 42,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, e, stack) =>
-                        Icon(ArchiveFileTypes.icon(entry.name))) :
-                    Icon(ArchiveFileTypes.icon(entry.name), size: 28);
-                  return ListTile(
-                    leading: SizedBox(width: 48, child: Center(child: img)),
-                    title: Text(entry.name,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      '${entry.created ? "Created ZIP" : ArchiveFileTypes.label(entry.name)}'
-                      ' · ${_size(entry.size)}',
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _details(entry),
+                  final group = groups[index];
+                  final created = group.key == 'created';
+                  final expanded = _expandedSessions.contains(group.key);
+                  return Card(
+                    margin: const EdgeInsets.fromLTRB(12, 5, 12, 5),
+                    child: Column(children: [
+                      ListTile(
+                        leading: Icon(created ? Icons.archive_outlined : Icons.folder_zip_outlined),
+                        title: Text(created ? 'Created ZIPs' :
+                            (_sessionNames[group.key] ?? 'Extracted ZIP'),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Text('\x24{group.value.length} file(s)'),
+                        trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                        onTap: () => setState(() {
+                          if (expanded) {
+                            _expandedSessions.remove(group.key);
+                          } else {
+                            _expandedSessions.add(group.key);
+                          }
+                        }),
+                      ),
+                      if (expanded) ...[
+                        const Divider(height: 1),
+                        for (final entry in group.value)
+                          ListTile(
+                            contentPadding: const EdgeInsets.only(left: 26, right: 12),
+                            leading: Icon(ArchiveFileTypes.icon(entry.name)),
+                            title: Text(created ? entry.name :
+                                p.joinAll(p.split(entry.relativePath).skip(1)),
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                            subtitle: Text('\x24{ArchiveFileTypes.label(entry.name)}'
+                                ' · \x24{_size(entry.size)}'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _details(entry),
+                          ),
+                      ],
+                    ]),
                   );
                 },
               )),

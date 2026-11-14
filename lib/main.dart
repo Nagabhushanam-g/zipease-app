@@ -111,13 +111,14 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _perform(Future<ArchiveOutput> Function() job, String description) async {
+  Future<void> _perform(Future<ArchiveOutput> Function() job, String description,
+      {String? sourceName}) async {
     setState(() { _busy = true; _status = description; });
     try {
       final output = await job();
       if (mounted) setState(() => _status = 'Saving to My Files…');
       // Permanently retain every successful create/extract operation.
-      final stored = await ArchiveLibrary().keep(output);
+      final stored = await ArchiveLibrary().keep(output, sourceName: sourceName);
       if (!mounted) return;
       await Navigator.push<void>(
         context,
@@ -175,6 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
           password: password,
         ),
         'Extracting your ZIP file…',
+        sourceName: selected.name,
       );
     } catch (error) {
       _error(error);
