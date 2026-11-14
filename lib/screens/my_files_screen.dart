@@ -7,6 +7,7 @@ import '../services/archive_file_types.dart';
 import '../services/archive_library.dart';
 import '../services/export_service.dart';
 import '../services/file_actions.dart';
+import 'archive_folder_browser.dart';
 
 enum _Source { all, created, extracted }
 
@@ -384,7 +385,7 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Align(alignment: Alignment.centerLeft,
-                  child: Text('\x24{matches.length} file(s) in \x24{groups.length} group(s)',
+                  child: Text('${matches.length} file(s) in ${groups.length} group(s)',
                     style: Theme.of(context).textTheme.bodySmall)),
               ),
               Expanded(child: ListView.builder(
@@ -401,17 +402,51 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                         title: Text(created ? 'Created ZIPs' :
                             (_sessionNames[group.key] ?? 'Extracted ZIP'),
                           style: const TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: Text('\x24{group.value.length} file(s)'),
-                        trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
-                        onTap: () => setState(() {
-                          if (expanded) {
-                            _expandedSessions.remove(group.key);
-                          } else {
-                            _expandedSessions.add(group.key);
+                        subtitle: Text('${group.value.length} file(s)'),
+                        trailing: Icon(created ? (expanded
+                            ? Icons.expand_less : Icons.expand_more) : Icons.chevron_right),
+                        onTap: () async {
+                          if (!created) {
+                            // Browse the complete archive, even if My Files
+                            // currently has a category/search filter applied.
+                            try {
+                              final folders = await _library.folderPaths(group.key);
+                              if (!mounted) return;
+                              final entries = snap.data!.where((item) =>
+                                !item.created &&
+                                p.split(item.relativePath).first == group.key,
+                              ).toList();
+                              await Navigator.push<void>(context,
+                                MaterialPageRoute<void>(builder: (_) =>
+                                  ArchiveFolderBrowser(
+                                    archiveName: _sessionNames[group.key]
+                                        ?? 'Earlier extraction',
+                                    entries: entries,
+                                    folderPaths: folders,
+                                    onFileTap: _details,
+                                  ),
+                                ),
+                              );
+                            } catch (_) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content:
+                                    Text('Could not open this ZIP folder.')),
+                                );
+                              }
+                            }
+                            return;
                           }
-                        }),
+                          setState(() {
+                            if (expanded) {
+                              _expandedSessions.remove(group.key);
+                            } else {
+                              _expandedSessions.add(group.key);
+                            }
+                          });
+                        },
                       ),
-                      if (expanded) ...[
+                      if (created && expanded) ...[
                         const Divider(height: 1),
                         for (final entry in group.value)
                           ListTile(
@@ -420,8 +455,8 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                             title: Text(created ? entry.name :
                                 p.joinAll(p.split(entry.relativePath).skip(1)),
                               maxLines: 2, overflow: TextOverflow.ellipsis),
-                            subtitle: Text('\x24{ArchiveFileTypes.label(entry.name)}'
-                                ' · \x24{_size(entry.size)}'),
+                            subtitle: Text('${ArchiveFileTypes.label(entry.name)}'
+                                ' · ${_size(entry.size)}'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => _details(entry),
                           ),
