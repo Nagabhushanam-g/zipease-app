@@ -115,6 +115,17 @@ class ArchiveLibrary {
     return found;
   }
 
+  /// Search by filename, internal folder path OR the user-visible source ZIP.
+  /// This keeps archives discoverable without exposing opaque session IDs.
+  static bool matchesSearch(LibraryEntry entry, String query,
+      {String? sourceArchive}) {
+    final term = query.trim().toLowerCase();
+    if (term.isEmpty) return true;
+    return entry.name.toLowerCase().contains(term) ||
+        entry.relativePath.toLowerCase().contains(term) ||
+        (sourceArchive?.toLowerCase().contains(term) ?? false);
+  }
+
   Future<String> extractionName(String sessionId) async {
     final root = await _root();
     final candidates = [

@@ -182,6 +182,12 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
   }
 
   Future<void> _details(LibraryEntry entry) async {
+    final sourceZip = entry.created
+        ? null
+        : await _library.extractionName(p.split(entry.relativePath).first);
+    if (!mounted) return;
+    final originalPath = entry.created ? entry.name
+        : p.joinAll(p.split(entry.relativePath).skip(1));
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -211,7 +217,10 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
               const SizedBox(height: 8),
               Text('${ArchiveFileTypes.label(entry.name)} · ${_size(entry.size)}'),
               Text(entry.created ? 'Created ZIP' : 'Extracted file'),
-              Text(entry.relativePath, maxLines: 2,
+              if (sourceZip != null)
+                Text('From ZIP: $sourceZip',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text('Original path: $originalPath', maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(c).textTheme.bodySmall),
               const SizedBox(height: 14),
@@ -284,8 +293,8 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 6, 16, 10),
           child: Text(
-            'Created ZIPs and extracted files are saved here in ZipEase. '
-            'Choose a category or search by name.',
+            'Created ZIPs and extracted files stay grouped under their '
+            'source archive. Open a ZIP folder to browse its original folders.',
           ),
         ),
         Padding(
@@ -361,8 +370,9 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                 (_source == _Source.created && e.created) ||
                 (_source == _Source.extracted && !e.created)) &&
               (_category == null || e.category == _category) &&
-              (_query.isEmpty || e.name.toLowerCase().contains(_query) ||
-                e.relativePath.toLowerCase().contains(_query))
+              ArchiveLibrary.matchesSearch(e, _query,
+                sourceArchive: e.created ? null :
+                    _sessionNames[p.split(e.relativePath).first])
             ).toList();
             if (matches.isEmpty) {
               return const Center(child: Padding(
