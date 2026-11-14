@@ -378,11 +378,18 @@ class _ResultScreenState extends State<ResultScreen> {
     }
   }
 
-  Future<void> _save() => _export(
-    path: widget.output.path,
-    fileName: p.basename(widget.output.path),
-    wholeOutput: true,
-  );
+  Future<void> _save() async {
+    var name = p.basename(widget.output.path);
+    if (widget.output.isDirectory) {
+      final zipName = await ArchiveLibrary().extractionName(name);
+      name = ArchiveLibrary.exportFolderName(zipName);
+    }
+    await _export(
+      path: widget.output.path,
+      fileName: name,
+      wholeOutput: true,
+    );
+  }
 
   Future<void> _saveFile(String relativeName) async {
     // Names originate from our extracted folder scan. Android also checks

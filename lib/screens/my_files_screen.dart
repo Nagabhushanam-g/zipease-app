@@ -421,6 +421,7 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                                   ArchiveFolderBrowser(
                                     archiveName: _sessionNames[group.key]
                                         ?? 'Earlier extraction',
+                                    sessionId: group.key,
                                     entries: entries,
                                     folderPaths: folders,
                                     onFileTap: _details,

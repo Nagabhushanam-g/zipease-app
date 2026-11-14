@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/export_service.dart';
 
 import '../services/archive_file_types.dart';
 import '../services/archive_folder_tree.dart';
@@ -10,12 +11,14 @@ class ArchiveFolderBrowser extends StatefulWidget {
   const ArchiveFolderBrowser({
     super.key,
     required this.archiveName,
+    required this.sessionId,
     required this.entries,
     required this.folderPaths,
     required this.onFileTap,
   });
 
   final String archiveName;
+  final String sessionId;
   final List<LibraryEntry> entries;
   final List<String> folderPaths;
   final ValueChanged<LibraryEntry> onFileTap;
@@ -30,6 +33,33 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
     folderPaths: widget.folderPaths,
   );
   List<String> _location = [];
+  bool _exporting = false;
+
+  Future<void> _exportFolder() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final directory = await ArchiveLibrary().sessionDirectory(widget.sessionId);
+      final saved = await ExportService.saveToDevice(
+        directory.path,
+        fileName: ArchiveLibrary.exportFolderName(widget.archiveName),
+      );
+      if (!mounted) return;
+      if (saved) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Extracted ZIP folder saved to your selected location.'),
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Unable to export this ZIP folder.'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,12 +128,14 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
                 textAlign: TextAlign.center),
             ),
         ])),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(18, 6, 18, 12),
-          child: Text('Tap a folder to browse it or a file to open, share, '
-              'save or install it using Android.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: FilledButton.icon(
+            icon: const Icon(Icons.save_alt),
+            onPressed: _exporting ? null : _exportFolder,
+            label: Text(_exporting
+                ? 'Exporting…' : 'Export complete ZIP folder'),
+          ),
         ),
       ])),
     );

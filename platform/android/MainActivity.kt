@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private var pendingZipResult: MethodChannel.Result? = null
     private var pendingResult: MethodChannel.Result? = null
     private var exportSource: File? = null
+    private var exportDisplayName: String? = null
     private var incomingZipChannel: MethodChannel? = null
     private var dartOpenWithReady = false
     private var pendingOpenedZip: Map<String, String>? = null
@@ -140,12 +141,14 @@ class MainActivity : FlutterActivity() {
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 pendingResult = result
                 exportSource = source
+                exportDisplayName = safeName
                 try {
                     @Suppress("DEPRECATION")
                     startActivityForResult(intent, requestCodeExport)
                 } catch (e: Exception) {
                     pendingResult = null
                     exportSource = null
+                    exportDisplayName = null
                     result.error("PICKER_FAILED", e.message ?: "Could not open file picker", null)
                 }
             }
@@ -420,8 +423,10 @@ class MainActivity : FlutterActivity() {
         if (requestCode != requestCodeExport) return
         val result = pendingResult ?: return
         val source = exportSource
+        val displayName = exportDisplayName
         pendingResult = null
         exportSource = null
+        exportDisplayName = null
         val target = data?.data
         if (resultCode != Activity.RESULT_OK || source == null || target == null) {
             result.success(false)
@@ -432,7 +437,13 @@ class MainActivity : FlutterActivity() {
                 if (source.isDirectory) {
                     val root = DocumentsContract.buildDocumentUriUsingTree(
                         target, DocumentsContract.getTreeDocumentId(target))
-                    copyDirectory(source, root, source.canonicalFile)
+                    // Never flatten an extracted ZIP into the chosen folder.
+                    // Create a separate parent folder named for its source ZIP.
+                    val folder = DocumentsContract.createDocument(
+                        contentResolver, root, DocumentsContract.Document.MIME_TYPE_DIR,
+                        displayName ?: source.name
+                    ) ?: throw IllegalStateException("Could not create extracted ZIP folder")
+                    copyDirectory(source, folder, source.canonicalFile)
                 } else {
                     streamFile(source, target)
                 }

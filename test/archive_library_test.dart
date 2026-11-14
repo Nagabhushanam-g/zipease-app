@@ -55,6 +55,10 @@ void main() {
       expect(await File('${stored.path}/.zipease_source.json').exists(), isFalse);
       final sessionId = stored.path.split(Platform.pathSeparator).last;
       expect(await library.extractionName(sessionId), 'Project_Backup.zip');
+      expect(ArchiveLibrary.exportFolderName('Project_Backup.zip'), 'Project_Backup');
+      expect(ArchiveLibrary.exportFolderName('My Files.ZIP'), 'My Files');
+      expect(ArchiveLibrary.exportFolderName('../'), 'Extracted_Files');
+      expect((await library.sessionDirectory(sessionId)).path, stored.path);
       expect(await library.folderPaths(sessionId),
           containsAll(['photos', 'excel', 'word', 'ppt', 'apps', 'videos', 'audio', 'executables']));
       final reopened = ArchiveLibrary(root: root);

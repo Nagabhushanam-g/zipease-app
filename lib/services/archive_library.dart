@@ -153,6 +153,29 @@ class ArchiveLibrary {
     return result;
   }
 
+  /// Name a folder after its source archive instead of an internal session ID.
+  static String exportFolderName(String zipName) {
+    final base = p.basename(zipName.replaceAll('\\', '/')).trim();
+    final stem = base.toLowerCase().endsWith('.zip')
+        ? base.substring(0, base.length - 4)
+        : base;
+    final cleaned = stem.replaceAll(RegExp(r'[/\\<>:"|?*\x00-\x1F]'), '_').trim();
+    return cleaned.isEmpty || cleaned == '.' || cleaned == '..'
+        ? 'Extracted_Files'
+        : cleaned;
+  }
+
+  Future<Directory> sessionDirectory(String sessionId) async {
+    if (sessionId.isEmpty || p.basename(sessionId) != sessionId ||
+        sessionId == '.' || sessionId == '..') {
+      throw const FormatException('Invalid extraction session');
+    }
+    final root = await _root();
+    final dir = Directory(p.join(root.path, 'extracted', sessionId));
+    if (!await dir.exists()) throw const FormatException('Extracted folder missing');
+    return dir;
+  }
+
   Future<void> delete(LibraryEntry entry) async {
     final root = p.normalize(p.absolute((await _root()).path));
     final target = p.normalize(p.absolute(entry.path));
