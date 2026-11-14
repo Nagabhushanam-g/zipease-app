@@ -48,9 +48,15 @@ void main() {
       }
       final root = Directory('${temp.path}/saved');
       final library = ArchiveLibrary(root: root);
-      await library.keep(ArchiveOutput(
+      final stored = await library.keep(ArchiveOutput(
         path: extracted.path, fileCount: originals.length, isDirectory: true,
-      ));
+      ), sourceName: 'Project_Backup.zip');
+      // Internal ZipEase metadata cannot contaminate extracted file exports.
+      expect(await File('${stored.path}/.zipease_source.json').exists(), isFalse);
+      final sessionId = stored.path.split(Platform.pathSeparator).last;
+      expect(await library.extractionName(sessionId), 'Project_Backup.zip');
+      expect(await library.folderPaths(sessionId),
+          containsAll(['photos', 'excel', 'word', 'ppt', 'apps', 'videos', 'audio', 'executables']));
       final reopened = ArchiveLibrary(root: root);
       final entries = await reopened.files();
       expect(entries.length, originals.length);
