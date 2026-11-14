@@ -477,6 +477,10 @@ class MainActivity : FlutterActivity() {
     private fun copyDirectory(directory: File, targetParent: Uri, allowedRoot: File) {
         val rootPath = allowedRoot.canonicalPath
         for (child in (directory.listFiles() ?: throw IllegalStateException("Folder could not be listed")).sortedBy { it.name }) {
+            // Older ZipEase versions stored an internal metadata marker
+            // inside the extracted root. Do not export that extra file.
+            if (directory.canonicalFile == allowedRoot &&
+                child.name == ".zipease_source.json") continue
             val resolved = child.canonicalFile
             if (resolved.path != rootPath && !resolved.path.startsWith(rootPath + File.separator)) {
                 throw SecurityException("Linked content outside extracted directory is not allowed")
