@@ -52,13 +52,16 @@ class ArchiveLibrary {
         }
         await source.copy(p.join(staging.path, p.basename(source.path)));
       }
+      await staging.rename(finalDir.path);
       if (output.isDirectory) {
+        // Internal metadata must not be exported with original ZIP contents.
+        final metadata = Directory(p.join(root.path, '.zipease_meta'));
+        await metadata.create(recursive: true);
         final source = p.basename((sourceName ?? 'Unknown archive.zip').replaceAll('\\', '/'));
-        await File(p.join(staging.path, '.zipease_source.json')).writeAsString(
+        await File(p.join(metadata.path, '$id.json')).writeAsString(
           jsonEncode({'name': source.isEmpty ? 'Unknown archive.zip' : source}),
         );
       }
-      await staging.rename(finalDir.path);
       return ArchiveOutput(
         path: output.isDirectory ? finalDir.path :
             p.join(finalDir.path, p.basename(output.path)),
@@ -114,13 +117,40 @@ class ArchiveLibrary {
 
   Future<String> extractionName(String sessionId) async {
     final root = await _root();
-    final marker = File(p.join(root.path, 'extracted', sessionId, '.zipease_source.json'));
-    if (!await marker.exists()) return 'Earlier extraction';
-    try {
-      final value = jsonDecode(await marker.readAsString());
-      if (value is Map && value['name'] is String) return value['name'] as String;
-    } catch (_) {}
+    final candidates = [
+      File(p.join(root.path, '.zipease_meta', '$sessionId.json')),
+      // Backward compatible with older ZipEase versions.
+      File(p.join(root.path, 'extracted', sessionId, '.zipease_source.json')),
+    ];
+    for (final marker in candidates) {
+      if (!await marker.exists()) continue;
+      try {
+        final value = jsonDecode(await marker.readAsString());
+        if (value is Map && value['name'] is String) {
+          return value['name'] as String;
+        }
+      } catch (_) {}
+    }
     return 'Earlier extraction';
+  }
+
+  /// Include original empty folders when browsing extracted ZIPs.
+  Future<List<String>> folderPaths(String sessionId) async {
+    if (sessionId.isEmpty || p.basename(sessionId) != sessionId ||
+        sessionId == '.' || sessionId == '..') {
+      throw const FormatException('Invalid extracted ZIP identifier.');
+    }
+    final root = await _root();
+    final dir = Directory(p.join(root.path, 'extracted', sessionId));
+    if (!await dir.exists()) return [];
+    final result = <String>[];
+    await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      if (entity is Directory) {
+        result.add(p.relative(entity.path, from: dir.path));
+      }
+    }
+    result.sort();
+    return result;
   }
 
   Future<void> delete(LibraryEntry entry) async {
