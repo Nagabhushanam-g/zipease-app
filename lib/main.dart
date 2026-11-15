@@ -9,6 +9,7 @@ import 'services/archive_service.dart';
 import 'services/archive_library.dart';
 import 'screens/my_files_screen.dart';
 import 'services/archive_file_types.dart';
+import 'services/archive_folder_tree.dart';
 import 'services/export_service.dart';
 import 'services/zip_import_service.dart';
 import 'widgets/test_banner.dart';
@@ -346,9 +347,25 @@ class ResultScreen extends StatefulWidget {
 
 class _ResultScreenState extends State<ResultScreen> {
   late final Future<List<String>> _preview = widget.service.preview(widget.output);
+  late final Future<ArchiveFolderNode> _tree = _loadTree();
+  late final Future<String> _sourceName = widget.output.isDirectory
+      ? ArchiveLibrary().extractionName(p.basename(widget.output.path))
+      : Future<String>.value('');
+  List<String> _location = [];
   bool _saving = false;
   bool _saved = false;
   String _filter = '';
+
+  Future<ArchiveFolderNode> _loadTree() async {
+    if (!widget.output.isDirectory) return ArchiveFolderNode('', '');
+    final sessionId = p.basename(widget.output.path);
+    final library = ArchiveLibrary();
+    final entries = (await library.files()).where((entry) =>
+        !entry.created &&
+        p.split(entry.relativePath).first == sessionId).toList();
+    final directories = await library.folderPaths(sessionId);
+    return ArchiveFolderNode.build(entries, folderPaths: directories);
+  }
 
   Future<void> _export({
     required String path,
@@ -425,8 +442,18 @@ class _ResultScreenState extends State<ResultScreen> {
             style: TextStyle(color: Color(0xFF369A73), fontSize: 12)),
           const SizedBox(height: 16),
           if (isFolder) ...[
-            const Text('Extracted files · tap one to save it separately',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            FutureBuilder<String>(
+              future: _sourceName,
+              builder: (context, snapshot) => Text(
+                'From ZIP: ${snapshot.data ?? 'Loading archive name…'}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text('Browse original folders · tap a file to save it',
+              style: TextStyle(fontSize: 12, color: Color(0xFF647085))),
             const SizedBox(height: 8),
             TextField(
               decoration: const InputDecoration(
@@ -440,42 +467,107 @@ class _ResultScreenState extends State<ResultScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Expanded(child: Card(child: FutureBuilder<List<String>>(
-              future: _preview,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(child: Text('Unable to list extracted files.'));
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final allFiles = snapshot.data!;
-                if (allFiles.isEmpty) {
-                  return const Center(child: Text('This ZIP contains no files.'));
-                }
-                final visible = _filter.isEmpty ? allFiles :
-                    allFiles.where((name) => name.toLowerCase().contains(_filter)).toList();
-                if (visible.isEmpty) {
-                  return const Center(child: Text('No matching files.'));
-                }
-                return ListView.separated(
-                  itemCount: visible.length,
-                  itemBuilder: (context, index) {
-                    final name = visible[index];
-                    return ListTile(
-                      dense: true,
-                      leading: Icon(ArchiveFileTypes.icon(name)),
-                      title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(ArchiveFileTypes.label(name)),
-                      trailing: const Icon(Icons.save_alt_outlined),
-                      enabled: !_saving,
-                      onTap: () => _saveFile(name),
-                    );
-                  },
-                  separatorBuilder: (_, index) => const Divider(height: 1),
-                );
-              },
-            ))),
+            Expanded(child: Card(
+              child: _filter.isEmpty
+                  ? FutureBuilder<ArchiveFolderNode>(
+                      future: _tree,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const Center(child: Text(
+                            'Unable to browse extracted folders.'));
+                        }
+                        if (!snapshot.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final current = snapshot.data!.folderAt(_location);
+                        return Column(children: [
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Row(children: [
+                              TextButton.icon(
+                                onPressed: () => setState(() => _location = []),
+                                icon: const Icon(Icons.folder_zip_outlined, size: 18),
+                                label: const Text('ZIP'),
+                              ),
+                              for (var i = 0; i < _location.length; i++) ...[
+                                const Icon(Icons.chevron_right, size: 16),
+                                TextButton(
+                                  onPressed: () => setState(() {
+                                    _location = _location.take(i + 1).toList();
+                                  }),
+                                  child: Text(_location[i]),
+                                ),
+                              ],
+                            ]),
+                          ),
+                          const Divider(height: 1),
+                          Expanded(child: ListView(children: [
+                            for (final folder in current.orderedFolders)
+                              ListTile(
+                                leading: const Icon(Icons.folder_outlined),
+                                title: Text(folder.name),
+                                subtitle: Text('${folder.fileCount} file(s)'),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => setState(() {
+                                  _location = [..._location, folder.name];
+                                }),
+                              ),
+                            for (final entry in current.orderedFiles)
+                              ListTile(
+                                leading: Icon(ArchiveFileTypes.icon(entry.name)),
+                                title: Text(entry.name),
+                                subtitle: Text(ArchiveFileTypes.label(entry.name)),
+                                trailing: const Icon(Icons.save_alt_outlined),
+                                enabled: !_saving,
+                                onTap: () => _saveFile(p.joinAll(
+                                  p.split(entry.relativePath).skip(1),
+                                )),
+                              ),
+                            if (current.orderedFolders.isEmpty &&
+                                current.orderedFiles.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.all(24),
+                                child: Text('This folder is empty.',
+                                  textAlign: TextAlign.center),
+                              ),
+                          ])),
+                        ]);
+                      },
+                    )
+                  : FutureBuilder<List<String>>(
+                      future: _preview,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const Center(child: Text(
+                            'Unable to search extracted files.'));
+                        }
+                        if (!snapshot.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final visible = snapshot.data!.where((name) =>
+                            name.toLowerCase().contains(_filter)).toList();
+                        if (visible.isEmpty) {
+                          return const Center(child: Text('No matching files.'));
+                        }
+                        return ListView.builder(
+                          itemCount: visible.length,
+                          itemBuilder: (context, index) {
+                            final name = visible[index];
+                            return ListTile(
+                              leading: Icon(ArchiveFileTypes.icon(name)),
+                              title: Text(name, maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                              subtitle: Text(ArchiveFileTypes.label(name)),
+                              trailing: const Icon(Icons.save_alt_outlined),
+                              enabled: !_saving,
+                              onTap: () => _saveFile(name),
+                            );
+                          },
+                        );
+                      },
+                    ),
+            )),
           ] else const Spacer(),
           const SizedBox(height: 12),
           FilledButton.icon(
