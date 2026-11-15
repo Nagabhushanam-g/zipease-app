@@ -187,8 +187,8 @@ class ArchiveLibrary {
     return dir;
   }
 
-  /// Remove one complete extracted ZIP session and its private metadata.
-  /// Other archives, created ZIPs and copies exported to Downloads are untouched.
+  /// Remove one complete extracted ZIP and its private metadata.
+  /// Created ZIPs, other extractions and exported copies are not affected.
   Future<void> deleteExtractionSession(String sessionId) async {
     if (sessionId.isEmpty || p.basename(sessionId) != sessionId ||
         sessionId == '.' || sessionId == '..' ||
@@ -197,34 +197,21 @@ class ArchiveLibrary {
     }
     final root = await _root();
     final extractionRoot = Directory(p.join(root.path, 'extracted'));
-    final session = Directory(p.join(extractionRoot.path, sessionId));
-
-    // Do not follow a symlink or accept a path outside our extraction library.
+    final target = Directory(p.join(extractionRoot.path, sessionId));
     final rootPath = p.normalize(p.absolute(extractionRoot.path));
-    final sessionPath = p.normalize(p.absolute(session.path));
-    if (!p.isWithin(rootPath, sessionPath) ||
-        await FileSystemEntity.type(sessionPath, followLinks: false) ==
+    final targetPath = p.normalize(p.absolute(target.path));
+    if (!p.isWithin(rootPath, targetPath) ||
+        await FileSystemEntity.type(targetPath, followLinks: false) ==
             FileSystemEntityType.link) {
       throw const FormatException('Unsafe extraction session path.');
     }
-    if (!await session.exists()) {
+    if (!await target.exists()) {
       throw const FormatException('Extracted folder no longer exists.');
     }
-    await session.delete(recursive: true);
-    final metadata = File(p.join(root.path, '.zipease_meta', '
-    final root = p.normalize(p.absolute((await _root()).path));
-    final target = p.normalize(p.absolute(entry.path));
-    if (!p.isWithin(root, target)) {
-      throw const FormatException('Invalid ZipEase library path.');
-    }
-    final file = File(target);
-    if (await file.exists()) await file.delete();
+    await target.delete(recursive: true);
+    final marker = File(p.join(root.path, '.zipease_meta', '$sessionId.json'));
+    if (await marker.exists()) await marker.delete();
   }
-}
- + 'sessionId.json'));
-    if (await metadata.exists()) await metadata.delete();
-  }
-
   Future<void> delete(LibraryEntry entry) async {
     final root = p.normalize(p.absolute((await _root()).path));
     final target = p.normalize(p.absolute(entry.path));
