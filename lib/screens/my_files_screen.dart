@@ -426,8 +426,8 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                                 !item.created &&
                                 p.split(item.relativePath).first == group.key,
                               ).toList();
-                              await Navigator.push<void>(context,
-                                MaterialPageRoute<void>(builder: (_) =>
+                              final deleted = await Navigator.push<bool>(context,
+                                MaterialPageRoute<bool>(builder: (_) =>
                                   ArchiveFolderBrowser(
                                     archiveName: _sessionNames[group.key]
                                         ?? 'Earlier extraction',
@@ -438,6 +438,14 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                                   ),
                                 ),
                               );
+                              if (deleted == true && mounted) {
+                                _expandedSessions.remove(group.key);
+                                _refresh();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content:
+                                    Text('Extracted ZIP folder removed from My Files.')),
+                                );
+                              }
                             } catch (_) {
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(

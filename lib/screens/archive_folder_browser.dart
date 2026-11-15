@@ -61,6 +61,45 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
     }
   }
 
+  Future<void> _deleteExtraction() async {
+    if (_exporting) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete extracted ZIP?'),
+        content: Text(
+          'Remove all files and folders extracted from '
+          '${widget.archiveName} from ZipEase? '
+          'Your original ZIP and any files saved to Downloads will not be deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete extraction'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => _exporting = true);
+    try {
+      await ArchiveLibrary().deleteExtractionSession(widget.sessionId);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not remove the extracted ZIP folder.'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = _root.folderAt(_location);
@@ -130,11 +169,21 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
         ])),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton.icon(
-            icon: const Icon(Icons.save_alt),
-            onPressed: _exporting ? null : _exportFolder,
-            label: Text(_exporting
-                ? 'Exporting…' : 'Export complete ZIP folder'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FilledButton.icon(
+                icon: const Icon(Icons.save_alt),
+                onPressed: _exporting ? null : _exportFolder,
+                label: Text(_exporting
+                    ? 'Working…' : 'Export complete ZIP folder'),
+              ),
+              TextButton.icon(
+                onPressed: _exporting ? null : _deleteExtraction,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete this extraction'),
+              ),
+            ],
           ),
         ),
       ])),

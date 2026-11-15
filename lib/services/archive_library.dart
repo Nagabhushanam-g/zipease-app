@@ -187,6 +187,44 @@ class ArchiveLibrary {
     return dir;
   }
 
+  /// Remove one complete extracted ZIP session and its private metadata.
+  /// Other archives, created ZIPs and copies exported to Downloads are untouched.
+  Future<void> deleteExtractionSession(String sessionId) async {
+    if (sessionId.isEmpty || p.basename(sessionId) != sessionId ||
+        sessionId == '.' || sessionId == '..' ||
+        sessionId.contains('/') || sessionId.contains('\\')) {
+      throw const FormatException('Invalid extraction session.');
+    }
+    final root = await _root();
+    final extractionRoot = Directory(p.join(root.path, 'extracted'));
+    final session = Directory(p.join(extractionRoot.path, sessionId));
+
+    // Do not follow a symlink or accept a path outside our extraction library.
+    final rootPath = p.normalize(p.absolute(extractionRoot.path));
+    final sessionPath = p.normalize(p.absolute(session.path));
+    if (!p.isWithin(rootPath, sessionPath) ||
+        await FileSystemEntity.type(sessionPath, followLinks: false) ==
+            FileSystemEntityType.link) {
+      throw const FormatException('Unsafe extraction session path.');
+    }
+    if (!await session.exists()) {
+      throw const FormatException('Extracted folder no longer exists.');
+    }
+    await session.delete(recursive: true);
+    final metadata = File(p.join(root.path, '.zipease_meta', '
+    final root = p.normalize(p.absolute((await _root()).path));
+    final target = p.normalize(p.absolute(entry.path));
+    if (!p.isWithin(root, target)) {
+      throw const FormatException('Invalid ZipEase library path.');
+    }
+    final file = File(target);
+    if (await file.exists()) await file.delete();
+  }
+}
+ + 'sessionId.json'));
+    if (await metadata.exists()) await metadata.delete();
+  }
+
   Future<void> delete(LibraryEntry entry) async {
     final root = p.normalize(p.absolute((await _root()).path));
     final target = p.normalize(p.absolute(entry.path));
