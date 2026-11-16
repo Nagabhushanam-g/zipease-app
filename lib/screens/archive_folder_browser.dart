@@ -35,25 +35,36 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
   List<String> _location = [];
   bool _exporting = false;
 
-  Future<void> _exportFolder() async {
+  Future<void> _exportFolder({bool currentOnly = false}) async {
     if (_exporting) return;
+    // Freeze selection before opening Android's external folder picker.
+    final parts = List<String>.from(_location);
+    if (currentOnly && parts.isEmpty) return;
     setState(() => _exporting = true);
     try {
-      final directory = await ArchiveLibrary().sessionDirectory(widget.sessionId);
+      final library = ArchiveLibrary();
+      final directory = currentOnly
+          ? await library.subfolderDirectory(widget.sessionId, parts)
+          : await library.sessionDirectory(widget.sessionId);
+      final name = currentOnly
+          ? parts.last
+          : ArchiveLibrary.exportFolderName(widget.archiveName);
       final saved = await ExportService.saveToDevice(
         directory.path,
-        fileName: ArchiveLibrary.exportFolderName(widget.archiveName),
+        fileName: name,
       );
       if (!mounted) return;
       if (saved) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Extracted ZIP folder saved to your selected location.'),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(currentOnly
+              ? 'Saved the $name folder, including nested files.'
+              : 'Saved the complete extracted ZIP folder.'),
         ));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Unable to export this ZIP folder.'),
+          content: Text('Unable to export the selected ZIP folder.'),
         ));
       }
     } finally {
@@ -172,6 +183,15 @@ class _ArchiveFolderBrowserState extends State<ArchiveFolderBrowser> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (_location.isNotEmpty)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.drive_folder_upload_outlined),
+                  onPressed: _exporting
+                      ? null
+                      : () => _exportFolder(currentOnly: true),
+                  label: Text(_exporting
+                      ? 'Working…' : 'Export current folder: ${_location.last}'),
+                ),
               FilledButton.icon(
                 icon: const Icon(Icons.save_alt),
                 onPressed: _exporting ? null : _exportFolder,

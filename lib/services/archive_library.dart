@@ -187,6 +187,30 @@ class ArchiveLibrary {
     return dir;
   }
 
+  /// Resolve only a selected folder inside one saved extraction.
+  /// A canonical path check prevents escaping the archive via symlinks.
+  Future<Directory> subfolderDirectory(
+      String sessionId, List<String> folders) async {
+    final root = await sessionDirectory(sessionId);
+    if (folders.isEmpty) return root;
+    for (final part in folders) {
+      if (part.isEmpty || part == '.' || part == '..' ||
+          p.basename(part) != part || part.contains('\\') ||
+          part.contains('/')) {
+        throw const FormatException('Invalid archive subfolder.');
+      }
+    }
+    final requested = Directory(p.joinAll([root.path, ...folders]));
+    if (!await requested.exists()) {
+      throw const FormatException('Archive subfolder is unavailable.');
+    }
+    final resolvedRoot = p.normalize(await root.resolveSymbolicLinks());
+    final resolvedChild = p.normalize(await requested.resolveSymbolicLinks());
+    if (!p.isWithin(resolvedRoot, resolvedChild)) {
+      throw const FormatException('Archive subfolder is outside extraction.');
+    }
+    return requested;
+  }
   /// Remove one complete extracted ZIP and its private metadata.
   /// Created ZIPs, other extractions and exported copies are not affected.
   Future<void> deleteExtractionSession(String sessionId) async {

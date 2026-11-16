@@ -95,6 +95,18 @@ void main() {
       expect(ArchiveLibrary.exportFolderName('My Files.ZIP'), 'My Files');
       expect(ArchiveLibrary.exportFolderName('../'), 'Extracted_Files');
       expect((await library.sessionDirectory(sessionId)).path, stored.path);
+      // Save only a chosen subfolder without flattening other folders.
+      final selected = await library.subfolderDirectory(sessionId, ['excel']);
+      expect(await File('${selected.path}/data.xlsx').readAsBytes(),
+          originals['excel/data.xlsx']);
+      expect(await File('${selected.path}/photo.jpg').exists(), isFalse);
+      expect(await library.subfolderDirectory(sessionId, []),
+          isA<Directory>());
+      await expectLater(
+          library.subfolderDirectory(sessionId, ['..']), throwsFormatException);
+      await expectLater(
+          library.subfolderDirectory(sessionId, ['not-a-folder']),
+          throwsFormatException);
       expect(await library.folderPaths(sessionId),
           containsAll(['photos', 'excel', 'word', 'ppt', 'apps', 'videos', 'audio', 'executables']));
       final reopened = ArchiveLibrary(root: root);
