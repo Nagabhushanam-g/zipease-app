@@ -138,3 +138,37 @@ if core_dep not in gradle_source:
     gradle_source += '\n\ndependencies {\n    ' + core_dep + '\n}\n'
     gradle.write_text(gradle_source, encoding="utf-8")
 
+
+# Each Android project is generated from Flutter templates in CI.
+# Replace the template's ephemeral debug signing with our permanent release
+# signing identity. Keystore bytes and passwords come only from GitHub secrets.
+signing_source = gradle.read_text(encoding="utf-8")
+debug_signing = 'signingConfig = signingConfigs.getByName("debug")'
+if signing_source.count(debug_signing) != 1:
+    raise SystemExit("Flutter Android debug release-signing configuration not found.")
+release_signing = """
+    signingConfigs {
+        create("zipeaseRelease") {
+            val keystorePath = System.getenv("ZIPEASE_RELEASE_KEYSTORE_PATH")
+                ?: error("Missing ZIPEASE_RELEASE_KEYSTORE_PATH")
+            val password = System.getenv("ZIPEASE_RELEASE_PASSWORD")
+                ?: error("Missing ZIPEASE_RELEASE_PASSWORD")
+            storeFile = file(keystorePath)
+            storePassword = password
+            keyAlias = "zipease"
+            keyPassword = password
+        }
+    }
+"""
+if signing_source.count("    buildTypes {") != 1:
+    raise SystemExit("Android release buildTypes block was not found.")
+signing_source = signing_source.replace(
+    "    buildTypes {", release_signing + "\n    buildTypes {", 1
+).replace(
+    debug_signing,
+    'signingConfig = signingConfigs.getByName("zipeaseRelease")',
+    1,
+)
+if 'applicationId = "com.zipease.zipease"' not in signing_source:
+    raise SystemExit("ZipEase app ID unexpectedly changed; updates would lose data.")
+gradle.write_text(signing_source, encoding="utf-8")

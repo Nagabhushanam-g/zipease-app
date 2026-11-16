@@ -48,8 +48,36 @@ jobs:
       - name: Unit tests
         run: flutter test
 
+      - name: Restore the permanent ZipEase release signing key
+        env:
+          ZIPEASE_RELEASE_KEYSTORE_BASE64: ${{ secrets.ZIPEASE_RELEASE_KEYSTORE_BASE64 }}
+          ZIPEASE_RELEASE_PASSWORD: ${{ secrets.ZIPEASE_RELEASE_PASSWORD }}
+        shell: bash
+        run: |
+          if [[ -z "${ZIPEASE_RELEASE_KEYSTORE_BASE64:-}" || -z "${ZIPEASE_RELEASE_PASSWORD:-}" ]]; then
+            echo "::error::Missing permanent release signing secrets. Follow docs/ANDROID_SIGNING_SETUP.md. Do not distribute builds signed with a new debug key."
+            exit 1
+          fi
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/zipease-release.p12"
+          printf '%s' "$ZIPEASE_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storetype PKCS12 \
+            -storepass "$ZIPEASE_RELEASE_PASSWORD" -alias zipease >/dev/null
+          EXPECTED_FINGERPRINT="36:79:85:1B:F5:5D:7A:48:9C:71:64:0F:A3:2B:8C:88:E0:28:CD:AF:8C:27:FB:16:F6:94:5B:D7:F6:1D:F0:E3"
+          ACTUAL_FINGERPRINT="$(keytool -list -v -keystore "$KEYSTORE" -storetype PKCS12 \
+            -storepass "$ZIPEASE_RELEASE_PASSWORD" -alias zipease \
+            | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -1)"
+          if [[ "$ACTUAL_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]]; then
+            echo "::error::Wrong release signing key. Updating with it would fail and corrupt our signing continuity."
+            exit 1
+          fi
+          echo "ZIPEASE_RELEASE_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "Verified permanent release certificate fingerprint."
+
       - name: Build Android release APK
-        run: flutter build apk --release
+        env:
+          ZIPEASE_RELEASE_PASSWORD: ${{ secrets.ZIPEASE_RELEASE_PASSWORD }}
+        run: flutter build apk --release --build-number="$GITHUB_RUN_NUMBER"
 
       - name: Upload the installable APK
         uses: actions/upload-artifact@v4
