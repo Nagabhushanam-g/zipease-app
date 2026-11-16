@@ -138,8 +138,71 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final files = await FilePicker.pickFiles(type: FileType.any);
       if (!mounted || files.isEmpty) return;
-      await _perform(() => _archiveService.compress(files), 'Creating your ZIP file…');
+      final archiveName = await _zipNamePrompt(files.length);
+      if (!mounted || archiveName == null) return;
+      await _perform(
+        () => _archiveService.compress(files, archiveName: archiveName),
+        'Creating your ZIP file…',
+      );
     } catch (error) { _error(error); }
+  }
+
+  Future<String?> _zipNamePrompt(int fileCount) async {
+    final now = DateTime.now();
+    final date = '${now.year}${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}';
+    final controller = TextEditingController(text: 'Archive_$date');
+    String? validationError;
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('Name your ZIP'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$fileCount selected file(s)'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'ZIP filename',
+                    suffixText: '.zip',
+                    border: const OutlineInputBorder(),
+                    errorText: validationError,
+                  ),
+                  onChanged: (_) => update(() => validationError = null),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  try {
+                    final filename = ArchiveService.normalizeArchiveName(
+                      controller.text,
+                    );
+                    Navigator.pop(dialogContext, filename);
+                  } on FormatException catch (error) {
+                    update(() => validationError = error.message);
+                  }
+                },
+                child: const Text('Create ZIP'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _extract() => _extractPicked(browseAllFiles: false);

@@ -236,6 +236,36 @@ class ArchiveLibrary {
     final marker = File(p.join(root.path, '.zipease_meta', '$sessionId.json'));
     if (await marker.exists()) await marker.delete();
   }
+  /// Rename only a created ZIP, inside its own private session directory.
+  /// Refuse collisions and never overwrite an existing archive.
+  Future<String> renameCreatedZip(LibraryEntry entry, String requestedName) async {
+    if (!entry.created) {
+      throw const FormatException('Only created ZIPs can be renamed.');
+    }
+    final newName = ArchiveService.normalizeArchiveName(requestedName);
+    final root = await _root();
+    final created = Directory(p.join(root.path, 'created'));
+    final source = File(entry.path);
+    if (!await source.exists()) {
+      throw const FormatException('This ZIP is no longer available.');
+    }
+    final rootPath = p.normalize(await created.resolveSymbolicLinks());
+    final resolved = p.normalize(await source.resolveSymbolicLinks());
+    final relative = p.relative(resolved, from: rootPath);
+    if (!p.isWithin(rootPath, resolved) ||
+        p.split(relative).length != 2 ||
+        !entry.name.toLowerCase().endsWith('.zip')) {
+      throw const FormatException('Invalid saved ZIP path.');
+    }
+    if (entry.name == newName) return newName;
+    final destination = File(p.join(source.parent.path, newName));
+    if (await destination.exists()) {
+      throw const FormatException('A ZIP with that name already exists.');
+    }
+    await source.rename(destination.path);
+    return newName;
+  }
+
   Future<void> delete(LibraryEntry entry) async {
     final root = p.normalize(p.absolute((await _root()).path));
     final target = p.normalize(p.absolute(entry.path));

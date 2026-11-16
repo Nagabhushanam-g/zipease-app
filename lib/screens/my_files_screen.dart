@@ -119,6 +119,61 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
     }
   }
 
+  Future<void> _renameCreatedZip(LibraryEntry entry) async {
+    if (!entry.created) return;
+    final controller = TextEditingController(text: entry.name);
+    String? proposedName;
+    try {
+      proposedName = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Rename created ZIP'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'ZIP filename',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text),
+              child: const Text('Rename'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+    if (proposedName == null) return;
+    try {
+      final renamed = await _library.renameCreatedZip(entry, proposedName);
+      if (!mounted) return;
+      _refresh();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ZIP renamed to $renamed.')),
+      );
+    } on FormatException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Unable to rename this ZIP.'),
+        ));
+      }
+    }
+  }
+
   Future<void> _fileAction(LibraryEntry entry, FileAction action) async {
     if (_exporting) return;
     setState(() => _exporting = true);
@@ -248,6 +303,15 @@ class _MyFilesScreenState extends State<MyFilesScreen> {
                     _confirmInstall(entry);
                   },
                   label: const Text('Install APK'),
+                ),
+              if (entry.created)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.drive_file_rename_outline),
+                  onPressed: () {
+                    Navigator.pop(c);
+                    _renameCreatedZip(entry);
+                  },
+                  label: const Text('Rename ZIP'),
                 ),
               OutlinedButton.icon(
                 icon: const Icon(Icons.save_alt),

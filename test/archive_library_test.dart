@@ -5,6 +5,45 @@ import 'package:zipease/services/archive_library.dart';
 import 'package:zipease/services/archive_service.dart';
 
 void main() {
+  test('Custom ZIP names are safe, friendly and preserve the ZIP suffix', () {
+    expect(ArchiveService.normalizeArchiveName('Budget'), 'Budget.zip');
+    expect(ArchiveService.normalizeArchiveName(' Budget.ZIP '), 'Budget.zip');
+    expect(ArchiveService.normalizeArchiveName('Photos 2026'), 'Photos 2026.zip');
+    for (final name in ['', '../private', 'folder\\name', 'a:b', '.zip', List.filled(101, 'x').join()]) {
+      expect(() => ArchiveService.normalizeArchiveName(name),
+          throwsFormatException);
+    }
+  });
+
+  test('Renaming created ZIP leaves other archives and bytes untouched', () async {
+    final temp = await Directory.systemTemp.createTemp('zipease_rename_test_');
+    try {
+      final library = ArchiveLibrary(
+        root: Directory('${temp.path}/saved'),
+      );
+      final raw = File('${temp.path}/original.zip');
+      final bytes = [80, 75, 3, 4, 1, 2, 3, 255];
+      await raw.writeAsBytes(bytes);
+      final stored = await library.keep(ArchiveOutput(
+        path: raw.path, fileCount: 1, isDirectory: false,
+      ));
+      final saved = (await library.files()).single;
+      expect(saved.path, stored.path);
+      final renamed = await library.renameCreatedZip(saved, 'My Project');
+      expect(renamed, 'My Project.zip');
+      final entries = await library.files();
+      expect(entries.single.name, renamed);
+      expect(await File(entries.single.path).readAsBytes(), bytes);
+      expect(await File(raw.path).readAsBytes(), bytes);
+      await expectLater(
+        library.renameCreatedZip(entries.single, '../unsafe'),
+        throwsFormatException,
+      );
+    } finally {
+      if (await temp.exists()) await temp.delete(recursive: true);
+    }
+  });
+
   test('Created ZIPs persist across library instances', () async {
     final temp = await Directory.systemTemp.createTemp('zipease_lib_test_');
     try {

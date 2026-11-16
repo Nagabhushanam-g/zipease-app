@@ -18,11 +18,35 @@ class ArchiveOutput {
 class ArchiveService {
   static String _uniqueName() => DateTime.now().microsecondsSinceEpoch.toString();
 
+  /// Preserve recognizable archive names while blocking path traversal.
+  /// Users may type either "Backup" or "Backup.zip".
+  static String normalizeArchiveName(String proposed) {
+    var name = proposed.trim();
+    if (name.toLowerCase().endsWith('.zip')) {
+      name = name.substring(0, name.length - 4).trim();
+    }
+    if (name.isEmpty || name == '.' || name == '..' ||
+        name.length > 100 || name.endsWith('.') ||
+        RegExp(r'[\\/:*?"<>|\x00-\x1F]').hasMatch(name)) {
+      throw const FormatException(
+        'Choose a ZIP name (up to 100 characters) without / \\ : * ? " < > |',
+      );
+    }
+    return '$name.zip';
+  }
+
   /// Uses cached copies produced by Android's Storage Access Framework picker.
-  Future<ArchiveOutput> compress(List<PlatformFile> pickedFiles) async {
+  Future<ArchiveOutput> compress(List<PlatformFile> pickedFiles,
+      {String archiveName = 'My_Archive'}) async {
     if (pickedFiles.isEmpty) throw const FormatException('Select at least one file.');
+    final fileName = normalizeArchiveName(archiveName);
     final cache = await getTemporaryDirectory();
-    final output = File(p.join(cache.path, 'zipease_${_uniqueName()}.zip'));
+    // A unique work directory prevents repeat names from overwriting
+    // an earlier created ZIP, even before it is copied into My Files.
+    final workDir = await Directory(
+      p.join(cache.path, 'zipease_build_${_uniqueName()}'),
+    ).create(recursive: true);
+    final output = File(p.join(workDir.path, fileName));
     final encoder = ZipFileEncoder();
     final used = <String>{};
     var created = false;
@@ -54,7 +78,7 @@ class ArchiveService {
       if (created) {
         try { await encoder.close(); } catch (_) {}
       }
-      if (await output.exists()) await output.delete();
+      if (await workDir.exists()) await workDir.delete(recursive: true);
       rethrow;
     }
   }
